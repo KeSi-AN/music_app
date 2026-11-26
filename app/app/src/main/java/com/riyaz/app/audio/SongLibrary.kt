@@ -22,13 +22,17 @@ data class Song(
     val tempo: Float = 1f,
     val naturalVoice: Boolean = false,
     val lastOpened: Long = System.currentTimeMillis(),
+    /** Where it came from: a YouTube watch URL, or null for a file on the phone. */
+    val sourceUrl: String? = null,
+    val thumbnailUrl: String? = null,
 ) {
     val durationMs: Long get() = frames * 1000L / sampleRate
 }
 
 /**
  * Keeps decoded songs in app storage: songs/<id>/{audio.pcm, meta.json, peaks.bin}.
- * Decoded audio is large (~10 MB per minute), so only the most recent [MAX_SONGS] are kept.
+ * Decoded audio is large (~10 MB per minute), so only the most recent [MAX_SONGS] are kept
+ * (YouTube songs can be fetched again).
  */
 class SongLibrary(private val context: Context) {
     private val root = File(context.filesDir, "songs").apply { mkdirs() }
@@ -109,6 +113,46 @@ class SongLibrary(private val context: Context) {
         }
 
         dir.mkdirs()
+        val result = decodeInto(dir, uri, onProgress)
+        val (title, artist) = readTags(uri, name)
+        return finish(Song(id, title, artist, result.sampleRate, result.frames))
+    }
+
+    /** Library id for a YouTube video, so the same video is only downloaded and decoded once. */
+    fun youtubeId(videoId: String) = "yt-" + videoId.filter { it.isLetterOrDigit() || it == '-' || it == '_' }
+
+    /** Returns the cached song for this id if its audio is complete. */
+    fun cached(id: String): Song? =
+        runCatching { readMeta(File(root, id)) }.getOrNull()
+            ?.takeIf { pcmFile(it).length() == it.frames * 4 }
+            ?.let { touch(it) }
+
+    /** Work folder for a download; it becomes the song's folder. */
+    fun folderFor(id: String): File = File(root, id).apply { mkdirs() }
+
+    /**
+     * Decodes an already-downloaded file in [id]'s folder, then deletes it. Only the decoded audio is
+     * kept; the song can be fetched again from [sourceUrl].
+     */
+    fun importDownloaded(
+        id: String, file: File, title: String, artist: String?,
+        sourceUrl: String, thumbnailUrl: String?, onProgress: (Float) -> Unit,
+    ): Song {
+        val dir = File(root, id)
+        val result = try {
+            decodeInto(dir, android.net.Uri.fromFile(file), onProgress)
+        } finally {
+            file.delete()
+        }
+        return finish(Song(id, title, artist, result.sampleRate, result.frames, sourceUrl = sourceUrl, thumbnailUrl = thumbnailUrl))
+    }
+
+    /** Throws away a half-finished download or decode. */
+    fun discard(id: String) {
+        File(root, id).deleteRecursively()
+    }
+
+    private fun decodeInto(dir: File, uri: Uri, onProgress: (Float) -> Unit): AudioDecoder.Result {
         val tmp = File(dir, "audio.pcm.part")
         val result = try {
             AudioDecoder(context).decode(uri, tmp, onProgress)
@@ -117,9 +161,10 @@ class SongLibrary(private val context: Context) {
             throw e
         }
         tmp.renameTo(File(dir, "audio.pcm"))
+        return result
+    }
 
-        val (title, artist) = readTags(uri, name)
-        val song = Song(id, title, artist, result.sampleRate, result.frames)
+    private fun finish(song: Song): Song {
         save(song)
         evictOld()
         return song
@@ -133,6 +178,7 @@ class SongLibrary(private val context: Context) {
             .put("semitones", song.semitones).put("cents", song.cents)
             .put("tempo", song.tempo.toDouble()).put("naturalVoice", song.naturalVoice)
             .put("lastOpened", song.lastOpened)
+            .put("sourceUrl", song.sourceUrl ?: "").put("thumbnailUrl", song.thumbnailUrl ?: "")
         File(dir, "meta.json").writeText(j.toString(2))
     }
 
@@ -155,6 +201,8 @@ class SongLibrary(private val context: Context) {
             tempo = j.optDouble("tempo", 1.0).toFloat(),
             naturalVoice = j.optBoolean("naturalVoice"),
             lastOpened = j.optLong("lastOpened"),
+            sourceUrl = j.optString("sourceUrl").ifBlank { null },
+            thumbnailUrl = j.optString("thumbnailUrl").ifBlank { null },
         )
     }
 
@@ -194,7 +242,7 @@ class SongLibrary(private val context: Context) {
         MessageDigest.getInstance("SHA-1").digest(s.toByteArray()).joinToString("") { "%02x".format(it) }
 
     companion object {
-        const val MAX_SONGS = 8
+        const val MAX_SONGS = 12
         const val OVERVIEW_BINS = 600
     }
 }

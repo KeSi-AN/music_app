@@ -12,11 +12,14 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
 import androidx.core.content.IntentCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import com.riyaz.app.ui.HomeScreen
 import com.riyaz.app.ui.PlayerScreen
 import com.riyaz.app.ui.RiyazTheme
 import kotlinx.coroutines.launch
@@ -53,7 +56,8 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             RiyazTheme {
-                PlayerScreen(vm)
+                val s by vm.state.collectAsState()
+                if (s.showPlayer && s.song != null) PlayerScreen(vm) else HomeScreen(vm)
             }
         }
     }
@@ -63,14 +67,22 @@ class MainActivity : ComponentActivity() {
         handleIntent(intent)
     }
 
-    /** "Open with" and "Share" from a file manager, WhatsApp, a recorder, etc. */
+    /**
+     * "Open with" / "Share" from a file manager, WhatsApp or a recorder (a file), or "Share" from the
+     * YouTube app (text with a link).
+     */
     private fun handleIntent(intent: Intent?) {
-        val uri: Uri? = when (intent?.action) {
-            Intent.ACTION_VIEW -> intent.data
-            Intent.ACTION_SEND -> IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
-            else -> null
+        when (intent?.action) {
+            Intent.ACTION_VIEW -> intent.data?.let(vm::open)
+            Intent.ACTION_SEND -> {
+                val uri = IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
+                val text = intent.getStringExtra(Intent.EXTRA_TEXT)
+                when {
+                    uri != null -> vm.open(uri)
+                    !text.isNullOrBlank() -> vm.handleSharedText(text)
+                }
+            }
         }
-        if (uri != null) vm.open(uri)
     }
 
     override fun onDestroy() {

@@ -21,7 +21,16 @@ The APK is written to `app/build/outputs/apk/release/app-release.apk`. It's sign
 - `audio/SongLibrary.kt`: decoded songs in `files/songs/<id>/`.
   - The key and speed you last used are saved per song.
   - Only the 8 most recent songs are kept.
-- `PlayerViewModel.kt` and `ui/PlayerScreen.kt`: the player.
+- `youtube/`: YouTube search, link detection and audio download.
+  - Uses NewPipeExtractor, pinned to the version the NewPipe app ships.
+  - Downloads the best audio-only stream (usually Opus 160 kbps) in 2 MB range requests.
+  - YouTube songs are cached as `yt-<videoId>`, so opening a video again is instant.
+- `PlayerViewModel.kt`: search, opening songs, and playback.
+- `ui/HomeScreen.kt`: the search box (YouTube or YouTube Music), results, Recent and the now-playing bar.
+- `ui/PlayerScreen.kt`: the player.
+- `../BACKLOG.md`: fixes and improvements outside the phase plan.
+
+If YouTube stops working, first bump `NewPipeExtractor` to the version in NewPipe's latest `gradle/libs.versions.toml`.
 
 ## Testing on the phone
 

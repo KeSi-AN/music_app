@@ -13,7 +13,11 @@ import androidx.lifecycle.viewModelScope
 import com.riyaz.app.audio.NativeEngine
 import com.riyaz.app.audio.Song
 import com.riyaz.app.audio.SongLibrary
+import com.riyaz.app.youtube.YouTube
+import com.riyaz.app.youtube.YtResult
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -22,14 +26,28 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/** Something slow is happening (download / decode). [progress] null = indeterminate. */
+data class Busy(val label: String, val title: String?, val progress: Float?)
+
+data class SearchState(
+    val query: String = "",
+    val source: YouTube.Source = YouTube.Source.YOUTUBE,
+    val link: String? = null,            // a YouTube link found in the query box
+    val results: List<YtResult> = emptyList(),
+    val searching: Boolean = false,
+    val error: String? = null,
+    val searchedFor: String? = null,     // the query the results belong to
+)
+
 data class PlayerState(
     val song: Song? = null,
     val peaks: FloatArray? = null,
-    val decoding: Boolean = false,
-    val decodeProgress: Float = 0f,
+    val busy: Busy? = null,
     val error: String? = null,
     val playing: Boolean = false,
     val recent: List<Song> = emptyList(),
+    val showPlayer: Boolean = false,
+    val search: SearchState = SearchState(),
 )
 
 private const val TAG = "Riyaz"
@@ -44,6 +62,9 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     // Kept separate from [state] so the 20-per-second playhead updates only redraw the playhead.
     private val _positionMs = MutableStateFlow(0L)
     val positionMs: StateFlow<Long> = _positionMs
+
+    private var searchJob: Job? = null
+    private var openJob: Job? = null
 
     private val focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
         .setAudioAttributes(
@@ -79,32 +100,131 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun open(uri: Uri) {
-        if (_state.value.decoding) return
-        pause()
-        _state.update { it.copy(decoding = true, decodeProgress = 0f, error = null) }
-        viewModelScope.launch {
+    // ------------------------------------------------------------------ navigation
+
+    fun showPlayer() = _state.update { if (it.song != null) it.copy(showPlayer = true) else it }
+    fun showHome() = _state.update { it.copy(showPlayer = false) }
+
+    // ------------------------------------------------------------------ search
+
+    fun setQuery(q: String) {
+        _state.update { it.copy(search = it.search.copy(query = q, link = YouTube.findLink(q), error = null)) }
+    }
+
+    fun setSource(source: YouTube.Source) {
+        _state.update { it.copy(search = it.search.copy(source = source)) }
+        val s = _state.value.search
+        if (s.query.isNotBlank() && s.link == null) search()
+    }
+
+    fun search() {
+        val s = _state.value.search
+        val q = s.query.trim()
+        if (q.isEmpty()) return
+        s.link?.let { openYouTube(it); return }
+        searchJob?.cancel()
+        _state.update { it.copy(search = it.search.copy(searching = true, error = null)) }
+        searchJob = viewModelScope.launch {
             try {
-                val song = withContext(Dispatchers.IO) {
-                    val t0 = SystemClock.elapsedRealtime()
-                    library.import(uri) { p -> _state.update { it.copy(decodeProgress = p) } }
-                        .also { Log.i(TAG, "import ${it.title}: ${SystemClock.elapsedRealtime() - t0} ms") }
-                }
-                load(song)
+                val results = withContext(Dispatchers.IO) { YouTube.search(q, s.source) }
+                _state.update { it.copy(search = it.search.copy(results = results, searchedFor = q, searching = false)) }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Throwable) {
-                _state.update { it.copy(error = e.message ?: "Couldn't open that file") }
-            } finally {
-                _state.update { it.copy(decoding = false, recent = library.recent()) }
+                Log.w(TAG, "search failed", e)
+                _state.update { it.copy(search = it.search.copy(searching = false, error = e.message)) }
             }
         }
     }
 
-    fun openRecent(song: Song) {
-        pause()
-        viewModelScope.launch {
-            load(withContext(Dispatchers.IO) { library.touch(song) })
-            _state.update { it.copy(recent = library.recent()) }
+    fun clearSearch() {
+        searchJob?.cancel()
+        _state.update { it.copy(search = SearchState(source = it.search.source)) }
+    }
+
+    /** Text shared from another app: a YouTube link opens straight away, anything else is searched. */
+    fun handleSharedText(text: String) {
+        val link = YouTube.findLink(text)
+        if (link != null) {
+            openYouTube(link)
+        } else {
+            setQuery(text.trim().take(200))
+            _state.update { it.copy(showPlayer = false) }
+            search()
         }
+    }
+
+    // ------------------------------------------------------------------ opening songs
+
+    fun open(uri: Uri) = startOpen(null) {
+        val t0 = SystemClock.elapsedRealtime()
+        busy("Preparing song…", null, 0f)
+        library.import(uri) { p -> progress(p) }
+            .also { Log.i(TAG, "import ${it.title}: ${SystemClock.elapsedRealtime() - t0} ms") }
+    }
+
+    fun openYouTube(result: YtResult) = openYouTube(result.url, result.title)
+
+    fun openYouTube(url: String, title: String? = null) = startOpen(title) {
+        val videoId = YouTube.videoId(url) ?: throw IllegalArgumentException("That doesn't look like a YouTube video link")
+        val id = library.youtubeId(videoId)
+        library.cached(id)?.let { return@startOpen it }   // seen before: instant
+
+        val t0 = SystemClock.elapsedRealtime()
+        busy("Downloading…", title, null)  // indeterminate until bytes arrive
+        val dl = try {
+            YouTube.downloadAudio(url, library.folderFor(id)) { p -> progress(p) }
+        } catch (e: Throwable) {
+            library.discard(id)
+            throw e
+        }
+        val t1 = SystemClock.elapsedRealtime()
+        busy("Preparing song…", dl.title, 0f)
+        library.importDownloaded(id, dl.file, dl.title, dl.channel, dl.url, dl.thumbnailUrl) { p -> progress(p) }
+            .also {
+                Log.i(TAG, "youtube ${dl.videoId} ${dl.file.name}: download ${t1 - t0} ms, decode ${SystemClock.elapsedRealtime() - t1} ms")
+            }
+    }
+
+    fun cancelOpen() {
+        openJob?.cancel()
+    }
+
+    fun openRecent(song: Song) {
+        if (song.id == _state.value.song?.id) {
+            showPlayer()
+            return
+        }
+        startOpen(song.title) { library.touch(song) }
+    }
+
+    /** Runs [block] (which produces a decoded song) and then loads it into the player. */
+    private fun startOpen(title: String?, block: suspend () -> Song) {
+        if (_state.value.busy != null) return
+        pause()
+        _state.update { it.copy(busy = Busy("Opening…", title, null), error = null) }
+        openJob = viewModelScope.launch {
+            try {
+                val song = withContext(Dispatchers.IO) { block() }
+                load(song)
+            } catch (e: CancellationException) {
+                // user cancelled: nothing to report
+            } catch (e: Throwable) {
+                Log.w(TAG, "open failed", e)
+                _state.update { it.copy(error = e.message ?: "Couldn't open that") }
+            } finally {
+                _state.update { it.copy(busy = null, recent = library.recent()) }
+            }
+        }
+    }
+
+    private fun busy(label: String, title: String?, progress: Float?) =
+        _state.update { it.copy(busy = Busy(label, title ?: it.busy?.title, progress)) }
+
+    /** Progress callback from blocking IO; also the place a cancel takes effect. */
+    private fun progress(p: Float) {
+        if (openJob?.isCancelled == true) throw CancellationException("cancelled")
+        _state.update { s -> s.busy?.let { s.copy(busy = it.copy(progress = p)) } ?: s }
     }
 
     private suspend fun load(song: Song) {
@@ -116,12 +236,12 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         applyToEngine(song)
-        val t1 = SystemClock.elapsedRealtime()
         val peaks = withContext(Dispatchers.IO) { library.overview(song) }
-        Log.i(TAG, "overview: ${SystemClock.elapsedRealtime() - t1} ms")
         _positionMs.value = 0
-        _state.update { it.copy(song = song, peaks = peaks, playing = false, error = null) }
+        _state.update { it.copy(song = song, peaks = peaks, playing = false, error = null, showPlayer = true) }
     }
+
+    // ------------------------------------------------------------------ playback
 
     private fun applyToEngine(song: Song) {
         NativeEngine.nativeSetSemitones(song.semitones + song.cents / 100f)
@@ -169,7 +289,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         val song = _state.value.song ?: return
         val updated = change(song)
         applyToEngine(updated)
-        _state.update { it.copy(song = updated) }
+        // Keep the Recent list in step, so it never shows stale key/speed.
+        _state.update { s -> s.copy(song = updated, recent = s.recent.map { if (it.id == updated.id) updated else it }) }
         viewModelScope.launch(Dispatchers.IO) { library.save(updated) }
     }
 

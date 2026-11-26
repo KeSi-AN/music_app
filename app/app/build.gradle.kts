@@ -28,7 +28,7 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             // Signed with the debug key for now: this is a personal app, sideloaded.
             signingConfig = signingConfigs.getByName("debug")
         }
@@ -37,6 +37,8 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        // NewPipeExtractor uses newer java.* APIs than Android 10 has
+        isCoreLibraryDesugaringEnabled = true
     }
 
     buildFeatures {
@@ -72,4 +74,13 @@ dependencies {
     implementation("androidx.core:core-ktx:1.18.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("com.google.oboe:oboe:1.10.0")
+
+    // YouTube: same extractor version as the NewPipe app 0.29.3
+    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.27.1")
+    implementation("com.squareup.okhttp3:okhttp:5.5.1")
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs_nio:2.1.5")
+
+    // Thumbnails
+    implementation("io.coil-kt.coil3:coil-compose:3.6.3")
+    implementation("io.coil-kt.coil3:coil-network-okhttp:3.6.3")
 }

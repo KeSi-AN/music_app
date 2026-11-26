@@ -10,6 +10,10 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // NewPipeExtractor (YouTube) is published on JitPack only
+        maven("https://jitpack.io") {
+            content { includeGroup("com.github.TeamNewPipe") }
+        }
     }
 }
 rootProject.name = "Riyaz"

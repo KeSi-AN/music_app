@@ -1,7 +1,11 @@
 package com.riyaz.app.ui
 
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import coil3.compose.AsyncImage
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -21,14 +25,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Forward5
-import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Replay5
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -36,7 +37,6 @@ import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
@@ -69,18 +69,16 @@ import kotlin.math.roundToInt
 @Composable
 fun PlayerScreen(vm: PlayerViewModel) {
     val s by vm.state.collectAsState()
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) vm.open(uri)
-    }
-    val openFile = { picker.launch(arrayOf("audio/*", "video/*")) }
+    val song = s.song ?: return
+    BackHandler(onBack = vm::showHome)
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Riyaz", fontWeight = FontWeight.SemiBold) },
-                actions = {
-                    IconButton(onClick = openFile, enabled = !s.decoding) {
-                        Icon(Icons.Default.FolderOpen, contentDescription = "Open a song")
+                title = { Text("Now playing", style = MaterialTheme.typography.titleMedium) },
+                navigationIcon = {
+                    IconButton(onClick = vm::showHome) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to search")
                     }
                 },
             )
@@ -94,42 +92,23 @@ fun PlayerScreen(vm: PlayerViewModel) {
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            s.error?.let { msg ->
-                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
-                    Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(msg, Modifier.weight(1f), color = MaterialTheme.colorScheme.onErrorContainer)
-                        TextButton(onClick = vm::dismissError) { Text("OK") }
-                    }
-                }
-            }
-
-            if (s.decoding) {
-                Card {
-                    Column(Modifier.padding(16.dp)) {
-                        Text("Preparing song…", style = MaterialTheme.typography.titleSmall)
-                        Spacer(Modifier.height(8.dp))
-                        LinearProgressIndicator(progress = { s.decodeProgress }, modifier = Modifier.fillMaxWidth())
-                    }
-                }
-            }
-
-            val song = s.song
-            if (song == null) {
-                EmptyState(onOpen = openFile, enabled = !s.decoding)
-            } else {
-                SongHeader(song)
-                PositionSection(vm, song, s.peaks)
-                Transport(playing = s.playing, onToggle = vm::togglePlay, onBack = { vm.skip(-5000) }, onFwd = { vm.skip(5000) })
-                KeyCard(song, vm)
-                SpeedCard(song, vm)
-            }
-
-            val others = s.recent.filter { it.id != song?.id }
-            if (others.isNotEmpty()) {
-                Text("Recent", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 6.dp))
-                others.forEach { r -> RecentRow(r) { vm.openRecent(r) } }
-            }
+            s.error?.let { ErrorCard(it, vm::dismissError) }
+            SongHeader(song)
+            PositionSection(vm, song, s.peaks)
+            Transport(playing = s.playing, onToggle = vm::togglePlay, onBack = { vm.skip(-5000) }, onFwd = { vm.skip(5000) })
+            KeyCard(song, vm)
+            SpeedCard(song, vm)
             Spacer(Modifier.height(24.dp))
+        }
+    }
+}
+
+@Composable
+fun ErrorCard(msg: String, onDismiss: () -> Unit) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(msg, Modifier.weight(1f), color = MaterialTheme.colorScheme.onErrorContainer)
+            TextButton(onClick = onDismiss) { Text("OK") }
         }
     }
 }
@@ -153,29 +132,20 @@ private fun PositionSection(vm: PlayerViewModel, song: Song, peaks: FloatArray?)
 }
 
 @Composable
-private fun EmptyState(onOpen: () -> Unit, enabled: Boolean) {
-    Column(
-        Modifier.fillMaxWidth().padding(vertical = 48.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Icon(Icons.Default.MusicNote, null, Modifier.size(56.dp), tint = MaterialTheme.colorScheme.primary)
-        Text("Play any song in your key", style = MaterialTheme.typography.titleMedium)
-        Text(
-            "Open an audio or video file, or share one to Riyaz from WhatsApp or your file manager.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Button(onClick = onOpen, enabled = enabled) { Text("Open a song") }
-    }
-}
-
-@Composable
 private fun SongHeader(song: Song) {
-    Column {
-        Text(song.title, style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        song.artist?.let {
-            Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        song.thumbnailUrl?.let {
+            AsyncImage(
+                model = it, contentDescription = null, contentScale = ContentScale.Crop,
+                modifier = Modifier.size(64.dp).clip(RoundedCornerShape(10.dp)),
+            )
+            Spacer(Modifier.width(12.dp))
+        }
+        Column {
+            Text(song.title, style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            song.artist?.let {
+                Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
     }
 }
@@ -359,33 +329,7 @@ private fun SpeedCard(song: Song, vm: PlayerViewModel) {
     }
 }
 
-@Composable
-private fun RecentRow(song: Song, onClick: () -> Unit) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) {
-            Icon(Icons.Default.MusicNote, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        Spacer(Modifier.width(10.dp))
-        Column(Modifier.weight(1f)) {
-            Text(song.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            val details = buildList {
-                song.artist?.let(::add)
-                add(fmt(song.durationMs))
-                if (song.semitones != 0) add("key ${if (song.semitones > 0) "+" else ""}${song.semitones}")
-                if (song.tempo != 1f) add("${(song.tempo * 100).roundToInt()}%")
-            }.joinToString(" · ")
-            Text(details, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
-}
-
-private fun fmt(ms: Long): String {
+internal fun fmt(ms: Long): String {
     val t = ms / 1000
     return "%d:%02d".format(t / 60, t % 60)
 }
