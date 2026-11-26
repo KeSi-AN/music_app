@@ -1,0 +1,3 @@
+signalsmith-stretch 1.4.0 (a670068)
+signalsmith-linear 0.6.4
+Both MIT. Headers copied unchanged from github.com/Signalsmith-Audio.
