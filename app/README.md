@@ -22,3 +22,20 @@ The APK is written to `app/build/outputs/apk/release/app-release.apk`. It's sign
   - The key and speed you last used are saved per song.
   - Only the 8 most recent songs are kept.
 - `PlayerViewModel.kt` and `ui/PlayerScreen.kt`: the player.
+
+## Testing on the phone
+
+A debug build adds `RenderTestReceiver`, a hook that renders a clip of the most recent song with given settings. Release builds don't include it.
+
+```powershell
+adb shell am broadcast -n com.riyaz.app/.RenderTestReceiver --ef start 60 --ef secs 20 --ef semis -3 --ef tempo 1 --ez natural false --es name k-3
+adb pull /sdcard/Android/data/com.riyaz.app/files/render/ test/render/
+```
+
+Then, with `source_60s.wav` cut from the original song using ffmpeg:
+- `python test/chroma_check.py test/render orig k-3` measures the actual key shift and counts clipped samples.
+- `python test/analyze_renders.py test/render` checks timing.
+
+Logcat tags:
+- `RiyazEngine` logs the stream setup, plus position every 5 s of song time while playing (used to check speed).
+- `Riyaz` logs which decoder was used and import timings.

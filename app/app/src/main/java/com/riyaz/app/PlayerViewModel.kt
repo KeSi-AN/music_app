@@ -6,6 +6,8 @@ import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.net.Uri
+import android.os.SystemClock
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.riyaz.app.audio.NativeEngine
@@ -27,9 +29,10 @@ data class PlayerState(
     val decodeProgress: Float = 0f,
     val error: String? = null,
     val playing: Boolean = false,
-    val positionMs: Long = 0,
     val recent: List<Song> = emptyList(),
 )
+
+private const val TAG = "Riyaz"
 
 class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private val library = SongLibrary(app)
@@ -37,6 +40,10 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _state = MutableStateFlow(PlayerState(recent = library.recent()))
     val state: StateFlow<PlayerState> = _state
+
+    // Kept separate from [state] so the 20-per-second playhead updates only redraw the playhead.
+    private val _positionMs = MutableStateFlow(0L)
+    val positionMs: StateFlow<Long> = _positionMs
 
     private val focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
         .setAudioAttributes(
@@ -64,7 +71,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                     val playing = NativeEngine.nativeIsPlaying()
                     // Song reached its end: give audio focus back to other apps.
                     if (_state.value.playing && !playing) audioManager.abandonAudioFocusRequest(focusRequest)
-                    _state.update { it.copy(positionMs = pos, playing = playing) }
+                    _positionMs.value = pos
+                    if (playing != _state.value.playing) _state.update { it.copy(playing = playing) }
                 }
                 delay(50)
             }
@@ -78,7 +86,9 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 val song = withContext(Dispatchers.IO) {
+                    val t0 = SystemClock.elapsedRealtime()
                     library.import(uri) { p -> _state.update { it.copy(decodeProgress = p) } }
+                        .also { Log.i(TAG, "import ${it.title}: ${SystemClock.elapsedRealtime() - t0} ms") }
                 }
                 load(song)
             } catch (e: Throwable) {
@@ -106,8 +116,11 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         applyToEngine(song)
-        val peaks = withContext(Dispatchers.IO) { library.peaks(song) }
-        _state.update { it.copy(song = song, peaks = peaks, positionMs = 0, playing = false, error = null) }
+        val t1 = SystemClock.elapsedRealtime()
+        val peaks = withContext(Dispatchers.IO) { library.overview(song) }
+        Log.i(TAG, "overview: ${SystemClock.elapsedRealtime() - t1} ms")
+        _positionMs.value = 0
+        _state.update { it.copy(song = song, peaks = peaks, playing = false, error = null) }
     }
 
     private fun applyToEngine(song: Song) {
@@ -138,10 +151,10 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         val song = _state.value.song ?: return
         val clamped = ms.coerceIn(0, song.durationMs)
         NativeEngine.nativeSeek(clamped * song.sampleRate / 1000L)
-        _state.update { it.copy(positionMs = clamped) }
+        _positionMs.value = clamped
     }
 
-    fun skip(deltaMs: Long) = seekTo(_state.value.positionMs + deltaMs)
+    fun skip(deltaMs: Long) = seekTo(_positionMs.value + deltaMs)
 
     fun setSemitones(st: Int) = updateSong { it.copy(semitones = st.coerceIn(-12, 12)) }
     fun setCents(c: Int) = updateSong { it.copy(cents = c.coerceIn(-50, 50)) }

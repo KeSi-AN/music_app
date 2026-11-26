@@ -18,4 +18,10 @@ object NativeEngine {
     external fun nativeFrames(): Long
     external fun nativeIsPlaying(): Boolean
     external fun nativeReachedEnd(): Boolean
+
+    /** Test harness only: offline render of part of a song with the live key/speed settings. */
+    external fun nativeRenderTest(
+        pcmPath: String, sampleRate: Int, startFrame: Long, outFrames: Int,
+        semitones: Float, tempo: Float, natural: Boolean, outWav: String,
+    ): Boolean
 }

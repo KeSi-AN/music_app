@@ -6,3 +6,7 @@ local.properties
 *.iml
 .idea/
 .kotlin/
+# Test output: phone screenshots and song clips stay local
+test/*.png
+test/*.txt
+test/render*/

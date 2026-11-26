@@ -6,6 +6,7 @@ find_package(oboe REQUIRED CONFIG)
 add_library(riyaz SHARED
     audio_engine.cpp
     jni_bridge.cpp
+    render_test.cpp
 )
 
 target_include_directories(riyaz PRIVATE

@@ -36,7 +36,6 @@ import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -119,16 +118,7 @@ fun PlayerScreen(vm: PlayerViewModel) {
                 EmptyState(onOpen = openFile, enabled = !s.decoding)
             } else {
                 SongHeader(song)
-                Waveform(
-                    peaks = s.peaks,
-                    progress = if (song.durationMs > 0) s.positionMs.toFloat() / song.durationMs else 0f,
-                    onSeek = { f -> vm.seekTo((f * song.durationMs).toLong()) },
-                )
-                Row(Modifier.fillMaxWidth()) {
-                    Text(fmt(s.positionMs), style = MaterialTheme.typography.labelMedium)
-                    Spacer(Modifier.weight(1f))
-                    Text(fmt(song.durationMs), style = MaterialTheme.typography.labelMedium)
-                }
+                PositionSection(vm, song, s.peaks)
                 Transport(playing = s.playing, onToggle = vm::togglePlay, onBack = { vm.skip(-5000) }, onFwd = { vm.skip(5000) })
                 KeyCard(song, vm)
                 SpeedCard(song, vm)
@@ -140,6 +130,24 @@ fun PlayerScreen(vm: PlayerViewModel) {
                 others.forEach { r -> RecentRow(r) { vm.openRecent(r) } }
             }
             Spacer(Modifier.height(24.dp))
+        }
+    }
+}
+
+/** The only part of the screen that follows the playhead. */
+@Composable
+private fun PositionSection(vm: PlayerViewModel, song: Song, peaks: FloatArray?) {
+    val positionMs by vm.positionMs.collectAsState()
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Waveform(
+            peaks = peaks,
+            progress = if (song.durationMs > 0) positionMs.toFloat() / song.durationMs else 0f,
+            onSeek = { f -> vm.seekTo((f * song.durationMs).toLong()) },
+        )
+        Row(Modifier.fillMaxWidth()) {
+            Text(fmt(positionMs), style = MaterialTheme.typography.labelMedium)
+            Spacer(Modifier.weight(1f))
+            Text(fmt(song.durationMs), style = MaterialTheme.typography.labelMedium)
         }
     }
 }

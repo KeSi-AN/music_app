@@ -3,6 +3,7 @@
 #include <oboe/Oboe.h>
 
 #include <atomic>
+#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -13,6 +14,22 @@
 #include "signalsmith-stretch/signalsmith-stretch.h"
 
 namespace riyaz {
+
+// Key/formant settings shared by live playback and the offline render test.
+void configureStretch(signalsmith::stretch::SignalsmithStretch<float> &st, float semis, bool natural,
+                      int sampleRate);
+
+// Output safety: modern masters sit at 0 dBFS and pitch-shifting overshoots that slightly.
+// A small fixed trim plus a smooth soft-clip keeps peaks under full scale without audible pumping.
+inline float softLimit(float x) {
+    constexpr float kTrim = 0.89f;   // -1 dB
+    constexpr float kKnee = 0.80f;
+    x *= kTrim;
+    float a = x < 0 ? -x : x;
+    if (a <= kKnee) return x;
+    float y = kKnee + (1.0f - kKnee) * std::tanh((a - kKnee) / (1.0f - kKnee));
+    return x < 0 ? -y : y;
+}
 
 // Plays a decoded song (raw 16-bit stereo PCM file) with independent key and speed.
 //
@@ -83,6 +100,7 @@ private:
     float appliedSemis_ = 1e9f;
     bool appliedNatural_ = false;
     bool feedingDone_ = false;
+    int64_t lastLoggedPos_ = 0;
 
     // Ring buffer: worker writes, callback reads. Totals are monotonic frame counters.
     std::vector<float> ring_ = std::vector<float>(kRingFrames * kChannels, 0.0f);

@@ -11,17 +11,15 @@ import java.io.File
 import java.io.FileOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import kotlin.math.abs
 import kotlin.math.max
 
 /**
  * Decodes any audio or video file Android can read (mp3, m4a, opus, flac, wav, mp4…)
  * into raw 16-bit little-endian stereo PCM, which the C++ engine memory-maps.
- * Also computes a coarse peak overview for the waveform.
  */
 class AudioDecoder(private val context: Context) {
 
-    class Result(val sampleRate: Int, val frames: Long, val peaks: FloatArray)
+    class Result(val sampleRate: Int, val frames: Long)
 
     fun decode(uri: Uri, out: File, onProgress: (Float) -> Unit): Result {
         val extractor = MediaExtractor()
@@ -38,22 +36,16 @@ class AudioDecoder(private val context: Context) {
             var channels = inFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
             var floatPcm = false
 
-            // Peak overview: about PEAK_BINS bins over the expected length.
-            val expectedFrames = max(1L, durationUs * sampleRate / 1_000_000L)
-            var framesPerBin = max(1L, expectedFrames / PEAK_BINS)
-            val peaks = ArrayList<Float>(PEAK_BINS + 64)
-            var binPeak = 0f
-            var binCount = 0L
 
-            val codec = MediaCodec.createDecoderByType(mime)
-            codec.configure(inFormat, null, null, 0)
-            codec.start()
+            val codec = openDecoder(mime, inFormat)
+            android.util.Log.i("Riyaz", "decoder ${codec.name} for $mime")
 
             var frames = 0L
             val info = MediaCodec.BufferInfo()
             var inputDone = false
             var outputDone = false
             val scratch = ByteBuffer.allocate(64 * 1024).order(ByteOrder.LITTLE_ENDIAN)
+            var copyBuf = ByteArray(64 * 1024)
 
             BufferedOutputStream(FileOutputStream(out), 256 * 1024).use { os ->
                 while (!outputDone) {
@@ -80,7 +72,6 @@ class AudioDecoder(private val context: Context) {
                             channels = f.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
                             floatPcm = f.containsKey(MediaFormat.KEY_PCM_ENCODING) &&
                                 f.getInteger(MediaFormat.KEY_PCM_ENCODING) == AudioFormat.ENCODING_PCM_FLOAT
-                            framesPerBin = max(1L, max(1L, durationUs * sampleRate / 1_000_000L) / PEAK_BINS)
                         }
                         outIdx >= 0 -> {
                             val buf = codec.getOutputBuffer(outIdx)!!.order(ByteOrder.LITTLE_ENDIAN)
@@ -88,7 +79,15 @@ class AudioDecoder(private val context: Context) {
                             buf.limit(info.offset + info.size)
                             val bytesPerSample = if (floatPcm) 4 else 2
                             val n = info.size / (bytesPerSample * channels)
-                            for (i in 0 until n) {
+                            if (!floatPcm && channels == 2) {
+                                // Common case: already 16-bit LE stereo, so copy the bytes straight through.
+                                os.write(scratch.array(), 0, scratch.position())
+                                scratch.clear()
+                                val bytes = n * 4
+                                if (copyBuf.size < bytes) copyBuf = ByteArray(bytes)
+                                buf.get(copyBuf, 0, bytes)
+                                os.write(copyBuf, 0, bytes)
+                            } else for (i in 0 until n) {
                                 val l: Float
                                 val r: Float
                                 if (floatPcm) {
@@ -106,14 +105,6 @@ class AudioDecoder(private val context: Context) {
                                 }
                                 scratch.putShort(toPcm16(l))
                                 scratch.putShort(toPcm16(r))
-
-                                val a = max(abs(l), abs(r))
-                                if (a > binPeak) binPeak = a
-                                if (++binCount >= framesPerBin) {
-                                    peaks.add(binPeak)
-                                    binPeak = 0f
-                                    binCount = 0
-                                }
                             }
                             frames += n
                             codec.releaseOutputBuffer(outIdx, false)
@@ -124,19 +115,20 @@ class AudioDecoder(private val context: Context) {
                 }
                 os.write(scratch.array(), 0, scratch.position())
             }
-            if (binCount > 0) peaks.add(binPeak)
             codec.stop()
             codec.release()
             if (frames == 0L) error("Couldn't decode any audio from this file")
-            return Result(sampleRate, frames, peaks.toFloatArray())
+            return Result(sampleRate, frames)
         } finally {
             extractor.release()
         }
     }
 
-    private fun toPcm16(x: Float): Short = (x.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
+    private fun openDecoder(mime: String, format: MediaFormat): MediaCodec =
+        MediaCodec.createDecoderByType(mime).apply {
+            configure(format, null, null, 0)
+            start()
+        }
 
-    companion object {
-        const val PEAK_BINS = 1200
-    }
+    private fun toPcm16(x: Float): Short = (x.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
 }

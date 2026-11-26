@@ -40,11 +40,64 @@ class SongLibrary(private val context: Context) {
             .mapNotNull { dir -> runCatching { readMeta(dir) }.getOrNull() }
             .sortedByDescending { it.lastOpened }
 
-    fun peaks(song: Song): FloatArray? = runCatching {
-        DataInputStream(File(File(root, song.id), "peaks.bin").inputStream().buffered()).use { s ->
-            FloatArray(s.readInt()) { s.readFloat() }
+    /**
+     * Loudness overview for the waveform: RMS per bin, contrast-stretched to 0..1.
+     * Peaks are useless here because loud modern masters hit full scale almost everywhere.
+     * Built from the PCM once and cached.
+     */
+    fun overview(song: Song): FloatArray? = runCatching {
+        val f = File(File(root, song.id), "overview_v2.bin")
+        if (f.exists()) {
+            DataInputStream(f.inputStream().buffered()).use { s -> FloatArray(s.readInt()) { s.readFloat() } }
+        } else {
+            buildOverview(pcmFile(song), song.frames).also { o ->
+                DataOutputStream(f.outputStream().buffered()).use { s ->
+                    s.writeInt(o.size)
+                    o.forEach { s.writeFloat(it) }
+                }
+            }
         }
     }.getOrNull()
+
+    private fun buildOverview(pcm: File, frames: Long): FloatArray {
+        val bins = OVERVIEW_BINS
+        val perBin = maxOf(1L, frames / bins)
+        val sums = DoubleArray(bins)
+        val counts = LongArray(bins)
+        val buf = ByteArray(1 shl 16)
+        var frame = 0L
+        pcm.inputStream().use { input ->
+            while (true) {
+                // Fill the whole buffer so every chunk stays a multiple of 32 bytes (except the last).
+                var n = 0
+                while (n < buf.size) {
+                    val r = input.read(buf, n, buf.size - n)
+                    if (r <= 0) break
+                    n += r
+                }
+                if (n <= 0) break
+                var i = 0
+                // Every 8th frame is plenty for a 600-bar overview and 8x cheaper.
+                // (Reads are 64 KiB, a multiple of 32 bytes, so the stride stays frame-aligned.)
+                while (i + 3 < n) {
+                    val l = ((buf[i + 1].toInt() shl 8) or (buf[i].toInt() and 0xff)).toShort() / 32768.0
+                    val r = ((buf[i + 3].toInt() shl 8) or (buf[i + 2].toInt() and 0xff)).toShort() / 32768.0
+                    val b = minOf(bins - 1, (frame / perBin).toInt())
+                    sums[b] += (l * l + r * r) / 2
+                    counts[b]++
+                    frame += 8
+                    i += 32
+                }
+            }
+        }
+        val rms = FloatArray(bins) { if (counts[it] > 0) kotlin.math.sqrt(sums[it] / counts[it]).toFloat() else 0f }
+        // Contrast: map the quiet floor (5th percentile of non-silent bins) to ~0.08 and the max to 1.
+        val sorted = rms.filter { it > 1e-4f }.sorted()
+        if (sorted.isEmpty()) return rms
+        val lo = sorted[(sorted.size * 0.05).toInt()]
+        val hi = sorted.last()
+        return FloatArray(bins) { i -> (0.08f + 0.92f * ((rms[i] - lo) / (hi - lo + 1e-6f))).coerceIn(0.03f, 1f) }
+    }
 
     /** Decodes [uri] (or reuses an earlier decode of the same file). */
     fun import(uri: Uri, onProgress: (Float) -> Unit): Song {
@@ -64,10 +117,6 @@ class SongLibrary(private val context: Context) {
             throw e
         }
         tmp.renameTo(File(dir, "audio.pcm"))
-        DataOutputStream(File(dir, "peaks.bin").outputStream().buffered()).use { s ->
-            s.writeInt(result.peaks.size)
-            result.peaks.forEach { s.writeFloat(it) }
-        }
 
         val (title, artist) = readTags(uri, name)
         val song = Song(id, title, artist, result.sampleRate, result.frames)
@@ -146,5 +195,6 @@ class SongLibrary(private val context: Context) {
 
     companion object {
         const val MAX_SONGS = 8
+        const val OVERVIEW_BINS = 600
     }
 }

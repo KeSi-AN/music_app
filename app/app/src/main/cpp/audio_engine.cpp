@@ -2,6 +2,8 @@
 
 #include <android/log.h>
 #include <fcntl.h>
+#include <pthread.h>
+#include <sys/resource.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -16,6 +18,16 @@
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 namespace riyaz {
+
+void configureStretch(signalsmith::stretch::SignalsmithStretch<float> &st, float semis, bool natural,
+                      int sampleRate) {
+    st.setTransposeSemitones(semis, 8000.0f / (float)sampleRate);
+    if (natural) {
+        st.setFormantSemitones(0, true);  // keep voice formants where they were
+    } else {
+        st.setFormantFactor(1, false);
+    }
+}
 
 AudioEngine::~AudioEngine() { unload(); }
 
@@ -105,6 +117,10 @@ bool AudioEngine::openStream() {
     }
     // A little headroom over the minimum avoids glitches without hurting responsiveness.
     stream_->setBufferSizeInFrames(stream_->getFramesPerBurst() * 4);
+    LOGI("stream: api=%d sharing=%d rate=%d (wanted %d) burst=%d buffer=%d perf=%d",
+         (int)stream_->getAudioApi(), (int)stream_->getSharingMode(), stream_->getSampleRate(),
+         sampleRate_, stream_->getFramesPerBurst(), stream_->getBufferSizeInFrames(),
+         (int)stream_->getPerformanceMode());
     if (playing_) stream_->requestStart();
     return true;
 }
@@ -196,6 +212,9 @@ void AudioEngine::stopWorker() {
 
 void AudioEngine::workerLoop() {
     using namespace std::chrono_literals;
+    pthread_setname_np(pthread_self(), "RiyazDSP");
+    // Same priority Android gives audio threads (THREAD_PRIORITY_AUDIO), so UI work can't starve it.
+    if (setpriority(PRIO_PROCESS, 0, -16) != 0) LOGI("could not raise DSP thread priority");
     while (!quit_) {
         int64_t req = seekReq_.exchange(-1);
         if (req >= 0) doSeek(req);
@@ -218,12 +237,7 @@ void AudioEngine::applyParams() {
     float s = semis_.load();
     bool nat = natural_.load();
     if (s != appliedSemis_ || nat != appliedNatural_) {
-        stretch_.setTransposeSemitones(s, 8000.0f / (float)sampleRate_);
-        if (nat) {
-            stretch_.setFormantSemitones(0, true);  // keep voice formants where they were
-        } else {
-            stretch_.setFormantFactor(1, false);
-        }
+        configureStretch(stretch_, s, nat, sampleRate_);
         appliedSemis_ = s;
         appliedNatural_ = nat;
     }
@@ -268,8 +282,8 @@ void AudioEngine::produce(int outFrames) {
     int64_t w = writeTotal_.load(std::memory_order_relaxed);
     for (int i = 0; i < outFrames; ++i) {
         size_t slot = (size_t)((w + i) % kRingFrames) * kChannels;
-        ring_[slot] = outBuf_[0][i];
-        ring_[slot + 1] = outBuf_[1][i];
+        ring_[slot] = softLimit(outBuf_[0][i]);
+        ring_[slot + 1] = softLimit(outBuf_[1][i]);
     }
     writeTotal_.store(w + outFrames, std::memory_order_release);
 }
@@ -284,6 +298,15 @@ void AudioEngine::updatePosition() {
     int64_t pos = inPos_ - stretch_.inputLatency() - (int64_t)(buffered * tempo);
     pos = std::clamp<int64_t>(pos, 0, frames_);
     posReport_ = pos;
+
+    // Debug trace: every ~5 s of song time, log position against the monotonic clock.
+    if (playing_ && std::llabs(pos - lastLoggedPos_) >= sampleRate_ * 5) {
+        lastLoggedPos_ = pos;
+        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+        LOGI("pos %lld frames at %lld ms (tempo %.2f, semis %.2f)", (long long)pos, (long long)ms, tempo,
+             semis_.load());
+    }
 
     if (pos >= frames_ && playing_ && !ended_) {
         ended_ = true;
