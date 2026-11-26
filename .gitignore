@@ -2,3 +2,11 @@
 ultimateguitar/
 chordai/
 guitartuna/
+# Spike: local-only material (environment, third-party code and models, song audio, Chord AI output)
+spike/.venv/
+spike/ext/
+spike/audio/
+spike/onnx/
+spike/chordai_ref/
+spike/now.png
+spike/__pycache__/
