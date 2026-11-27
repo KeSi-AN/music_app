@@ -92,6 +92,8 @@ fun KaraokeScreen(vm: PlayerViewModel) {
     ) { pad ->
         Column(Modifier.padding(pad).fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             VocalsCard(vm, song, k)
+            // the key suggestion, once there is one (hidden while singing, to leave room for the melody)
+            s.fit?.takeIf { it.suggestion != null && !k.singing }?.let { FitCard(it, song, vm, compact = true) }
             KeyAndChordRow(vm, song, s)
             if (k.backingReady) SingPanel(vm, song, k)
             LyricsPanel(vm, k, Modifier.weight(1f))

@@ -33,6 +33,8 @@ data class Song(
     val bpmFactor: Float = 1f,
     /** Karaoke vocal level when the instrumental exists: 0 = no vocals, 1 = the original recording. */
     val vocalLevel: Float = 1f,
+    /** The key Riyaz fitted to your voice (before your habit), once it has; overrides are learned against it. */
+    val fitBase: Int? = null,
 ) {
     val durationMs: Long get() = frames * 1000L / sampleRate
 }
@@ -190,6 +192,7 @@ class SongLibrary(private val context: Context) {
             .put("sourceUrl", song.sourceUrl ?: "").put("thumbnailUrl", song.thumbnailUrl ?: "")
             .put("capo", song.capo).put("simplifyChords", song.simplifyChords).put("bpmFactor", song.bpmFactor.toDouble())
             .put("vocalLevel", song.vocalLevel.toDouble())
+        song.fitBase?.let { j.put("fitBase", it) }
         File(dir, "meta.json").writeText(j.toString(2))
     }
 
@@ -218,6 +221,7 @@ class SongLibrary(private val context: Context) {
             simplifyChords = j.optBoolean("simplifyChords"),
             bpmFactor = j.optDouble("bpmFactor", 1.0).toFloat(),
             vocalLevel = j.optDouble("vocalLevel", 1.0).toFloat(),
+            fitBase = if (j.has("fitBase")) j.getInt("fitBase") else null,
         )
     }
 

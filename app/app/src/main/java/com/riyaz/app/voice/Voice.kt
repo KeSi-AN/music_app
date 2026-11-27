@@ -1,6 +1,7 @@
 package com.riyaz.app.voice
 
 import com.riyaz.app.audio.NativeEngine
+import com.riyaz.app.fit.KeyHabits
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -103,6 +104,13 @@ class VoiceStore(dir: File) {
     fun saveLearned(l: LearnedVoice) {
         val old = runCatching { JSONObject(file.readText()) }.getOrNull() ?: JSONObject()
         file.writeText(old.put("learned", l.toJson()).toString(2))
+    }
+
+    fun loadHabits(): KeyHabits = KeyHabits.fromJson(runCatching { JSONObject(file.readText()).optJSONArray("keyHabits") }.getOrNull())
+
+    fun saveHabits(h: KeyHabits) {
+        val old = runCatching { JSONObject(file.readText()) }.getOrNull() ?: JSONObject()
+        file.writeText(old.put("keyHabits", h.toJson()).toString(2))
     }
 }
 

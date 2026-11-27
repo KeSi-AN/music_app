@@ -14,7 +14,13 @@ import com.riyaz.app.analysis.AnalysisStore
 import com.riyaz.app.analysis.SongAnalysis
 import com.riyaz.app.analysis.SongAnalyzer
 import com.riyaz.app.audio.NativeEngine
+import com.riyaz.app.fit.KeyFit
+import com.riyaz.app.fit.KeyHabits
+import com.riyaz.app.fit.KeySuggestion
+import com.riyaz.app.fit.SongUnderstanding
+import com.riyaz.app.fit.Understanding
 import com.riyaz.app.karaoke.VocalSeparator
+import com.riyaz.app.voice.effectiveRange
 import com.riyaz.app.voice.VoiceProfile
 import com.riyaz.app.voice.LearnedVoice
 import com.riyaz.app.voice.Melody
@@ -40,6 +46,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -73,8 +81,13 @@ data class PlayerState(
     val tool: Tool? = null,
     val voice: VoiceProfile? = null,       // from the range test
     val learned: LearnedVoice = LearnedVoice(),
+    val habits: KeyHabits = KeyHabits(),
     val karaoke: KaraokeState = KaraokeState(),
+    val fit: FitState? = null,
 )
+
+/** Phase 6: what Riyaz understood about the song and the key it suggests for you ([needs] says what's missing). */
+data class FitState(val understanding: SongUnderstanding, val suggestion: KeySuggestion?, val needs: String?)
 
 enum class Tool { TUNER, VOICE_TEST }
 
@@ -104,7 +117,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private val audioManager = app.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
     private val voiceStore = VoiceStore(app.filesDir)
-    private val _state = MutableStateFlow(PlayerState(recent = library.recent(), voice = voiceStore.load(), learned = voiceStore.loadLearned()))
+    private val _state = MutableStateFlow(PlayerState(recent = library.recent(), voice = voiceStore.load(), learned = voiceStore.loadLearned(), habits = voiceStore.loadHabits()))
 
     // Your pitch on the song's timeline while singing; kept apart from [state] (it updates 30x a second).
     private val _liveSinging = MutableStateFlow<List<SungFrame>>(emptyList())
@@ -146,6 +159,13 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         .build()
 
     init {
+        // Phase 6: re-fit the key whenever something it depends on changes
+        viewModelScope.launch {
+            _state.map { s ->
+                listOf(s.song?.id, s.song?.title, s.song?.bpmFactor, s.song?.fitBase, s.karaoke.melody, s.karaoke.backingReady,
+                    s.karaoke.lyrics, s.analysis, s.analysisError, s.voice, s.learned, s.habits)
+            }.distinctUntilChanged().collect { refit() }
+        }
         // Poll the engine for position / end-of-song while a song is loaded.
         viewModelScope.launch {
             while (isActive) {
@@ -593,6 +613,66 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         updateKaraoke(song) { it.copy(syncing = false) }
     }
 
+    // ------------------------------------------------------------------ auto-fit (Phase 6)
+
+    private fun computeFit(s: PlayerState): FitState? {
+        val song = s.song ?: return null
+        val range = s.karaoke.melody?.range()
+        val und = SongUnderstanding(
+            language = Understanding.language(s.karaoke.lyrics?.lines?.map { it.text } ?: emptyList(), song.title),
+            singer = Understanding.singer(range?.third),
+            pace = Understanding.pace(s.analysis?.bpm?.times(song.bpmFactor)),
+            rangeLow = range?.first, rangeHigh = range?.second, center = range?.third,
+        )
+        val yours = effectiveRange(s.voice, s.learned)
+        val needs = when {
+            yours == null -> "Do the range test (My voice, on the home screen) and Riyaz will fit songs to your voice."
+            range == null && s.karaoke.backingReady -> "Working out the tune…"
+            range == null -> "Make the karaoke track once (Karaoke → Remove vocals) and Riyaz will fit the key to your voice."
+            s.analysis == null && s.analysisError == null -> "Working out the chords…"
+            else -> null
+        }
+        if (needs != null || yours == null || range == null) return FitState(und, null, needs)
+        val (low, high) = yours
+        val center = s.voice?.center?.takeIf { it in low..high } ?: ((low + high) / 2f)
+        val sug = KeyFit.suggest(range.first, range.second, range.third, low, high, center,
+            s.analysis?.segments ?: emptyList(), s.habits.bias())
+        return FitState(und, sug, null)
+    }
+
+    private fun refit() {
+        val s = _state.value
+        val fit = computeFit(s)
+        _state.update { it.copy(fit = fit) }
+        val song = s.song ?: return
+        val sug = fit?.suggestion ?: return
+        if (song.fitBase != null) return
+        // First fit for this song: fill it in, unless you've already picked a key or capo yourself.
+        if (song.semitones == 0 && song.cents == 0 && song.capo == 0) {
+            Log.i(TAG, "auto-fit ${song.id}: key ${sug.shift} capo ${sug.capo} (base ${sug.base}) - ${sug.reason}")
+            updateSong { it.copy(semitones = sug.shift, capo = sug.capo, fitBase = sug.base) }
+            if (sug.shift == sug.base) recordHabit(song.id, sug.base, sug.shift)
+        } else {
+            updateSong { it.copy(fitBase = sug.base) }
+            recordHabit(song.id, sug.base, song.semitones)
+        }
+    }
+
+    private fun recordHabit(songId: String, suggested: Int, chosen: Int) {
+        val h = _state.value.habits.record(songId, suggested, chosen)
+        _state.update { it.copy(habits = h) }
+        viewModelScope.launch(Dispatchers.IO) { voiceStore.saveHabits(h) }
+    }
+
+    /** Uses the suggested key and capo. */
+    fun applyFit() {
+        val sug = _state.value.fit?.suggestion ?: return
+        updateSong { it.copy(semitones = sug.shift, cents = 0, capo = sug.capo, fitBase = sug.base) }
+    }
+
+    /** Back to the recording's own key, no capo. */
+    fun useOriginalKey() = updateSong { it.copy(semitones = 0, cents = 0, capo = 0) }
+
     // ------------------------------------------------------------------ chords
 
     /** Loads the saved analysis, or works it out in the background (playback is unaffected). */
@@ -689,6 +769,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         val song = _state.value.song ?: return
         val updated = change(song)
         applyToEngine(updated)
+        // your own key choices on fitted songs teach Riyaz your habit
+        if (song.fitBase != null && updated.fitBase != null && updated.semitones != song.semitones) recordHabit(updated.id, updated.fitBase, updated.semitones)
         // Keep the Recent list in step, so it never shows stale key/speed.
         _state.update { s -> s.copy(song = updated, recent = s.recent.map { if (it.id == updated.id) updated else it }) }
         viewModelScope.launch(Dispatchers.IO) { library.save(updated) }

@@ -16,6 +16,17 @@ These are outside the phase plan (`BUILD_PLAN.md`). Newest first within each sec
 - **Without headphones:** the mic also hears the speaker, and at low volume it hears nothing.
 - **Also check:** a friend singing with "Learn from it" switched off doesn't change your profile.
 
+### Try Phase 6 (auto-fit) after the range test
+- **Why it's waiting:** your voice profile is empty, so Riyaz has no range to fit songs to yet. Checked on the phone on 2026-11-27 with a temporary test range, which was then removed.
+- **How:**
+  1. Do the range test (My voice, on the home screen).
+  2. Open a song that has a karaoke track (Uska Hi Bana, Vellake).
+- **What to check:**
+  - The "Fit to your voice" card suggests a key and capo that feel right, and its reason makes sense.
+  - Songs you've already set to a key keep that key; the card only offers **Use**.
+  - A new song, never changed by you, gets the fit filled in once its karaoke track is made.
+  - If you keep moving the suggested key the same way (for example 1 lower), after three songs the suggestion includes that habit.
+
 ## Fixes
 
 ### Slow first load of a new song
@@ -34,6 +45,11 @@ These are outside the phase plan (`BUILD_PLAN.md`). Newest first within each sec
 - **Done when:** a new 4–5 min song is playable within about 2 s, and fully prepared within about 5 s.
 
 ## Improvements
+
+### Auto-fit: what Phase 6 doesn't do yet
+- **Song type (genre/mood):** the plan said YAMNet. For now it only shows the pace (slow / mid-tempo / upbeat) from the BPM.
+- **Language without lyrics:** it comes from the lyrics' script, common words, or a language word in the title. Songs whose lyrics haven't been fetched show none (e.g. Seethakaalam).
+- **A suggestion before the karaoke track:** the song's vocal range comes from the melody, which needs the instrumental (2–3 min). A quick separation of just 60 s of the song would give the range much sooner.
 
 ### Chords over the lyrics in karaoke (Ultimate Guitar style)
 - **Want:** a toggle on the karaoke screen that shows each chord above the word where it changes, like a chord sheet. It follows your key, capo and Simple settings, and the current line stays highlighted.

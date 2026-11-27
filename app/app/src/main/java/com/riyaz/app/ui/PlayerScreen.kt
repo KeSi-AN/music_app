@@ -104,6 +104,7 @@ fun PlayerScreen(vm: PlayerViewModel) {
                 Text(if (s.karaoke.backingReady) "Karaoke" else "Karaoke: sing along with lyrics")
             }
             ChordSection(vm, song, s.analysis, s.analyzing, s.analysisError)
+            s.fit?.let { FitCard(it, song, vm) }
             KeyCard(song, vm)
             SpeedCard(song, vm)
             Spacer(Modifier.height(24.dp))
