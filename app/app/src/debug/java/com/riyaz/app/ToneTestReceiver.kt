@@ -23,6 +23,7 @@ class ToneTestReceiver : BroadcastReceiver() {
         val to = intent.getFloatExtra("to", hz.toFloat()).toDouble()
         val secs = intent.getFloatExtra("secs", 2f).toDouble()
         val harmonics = intent.getIntExtra("harmonics", 4)
+        val glide = intent.getFloatExtra("glide", secs.toFloat()).toDouble()   // slide time, then hold "to"
         val pending = goAsync()
         thread {
             try {
@@ -31,7 +32,7 @@ class ToneTestReceiver : BroadcastReceiver() {
                 val pcm = ShortArray(n)
                 var phase = 0.0
                 for (i in 0 until n) {
-                    val f = hz * exp(ln(to / hz) * i / n)
+                    val f = hz * exp(ln(to / hz) * minOf(1.0, i / (glide * sr)))
                     phase += 2 * PI * f / sr
                     var v = 0.0
                     for (h in 1..harmonics) v += sin(phase * h) / h

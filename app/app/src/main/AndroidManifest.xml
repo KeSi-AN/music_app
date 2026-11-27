@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- YouTube search and download -->
     <uses-permission android:name="android.permission.INTERNET" />
@@ -12,6 +13,13 @@
         android:roundIcon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:theme="@style/Theme.Riyaz">
+
+        <!-- ONNX Runtime ships Microsoft telemetry that starts itself at launch (device class, language,
+             time zone, possibly a device id). Riyaz sends nothing anywhere: remove it. See also Ort.kt. -->
+        <provider
+            android:name="ai.onnxruntime.TelemetryInitializer"
+            android:authorities="${applicationId}.onnxruntime_telemetry_initializer"
+            tools:node="remove" />
 
         <activity
             android:name=".MainActivity"

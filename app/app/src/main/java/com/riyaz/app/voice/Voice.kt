@@ -11,7 +11,8 @@ import kotlin.math.roundToInt
 
 /** One pitch reading from the microphone. [midi] is fractional (69.0 = A4), null when unvoiced. */
 data class PitchFrame(val hz: Float, val clarity: Float, val rms: Float, val tMs: Long) {
-    val voiced get() = hz > 0 && clarity >= 0.8f && rms >= 0.003f
+    // clarity: noise scores ~0.1; low notes through a phone mic or speaker can score as little as ~0.65
+    val voiced get() = hz > 0 && clarity >= 0.6f && rms >= 0.003f
     fun midi(a4: Float = 440f): Float? = if (voiced) Notes.midi(hz, a4) else null
 }
 

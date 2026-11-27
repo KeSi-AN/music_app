@@ -72,7 +72,7 @@ class VocalSeparator(private val context: Context) {
         pcm: File, sampleRate: Int, backingOut: File, onProgress: (Float) -> Unit, isCancelled: () -> Boolean,
         config: Config = Config(),
     ) {
-        val env = OrtEnvironment.getEnvironment()
+        val env = com.riyaz.app.analysis.Ort.env
         val opts = OrtSession.SessionOptions().apply {
             setCPUArenaAllocator(config.arena)
             if (config.xnnpack) {

@@ -77,6 +77,21 @@ PitchDetector::Result PitchDetector::analyse(const float *x) {
             return r;
         }
     }
+    // Octave errors: if a half, third or quarter of the period fits nearly as well, it's the real pitch
+    // (common when the fundamental is weak, e.g. low notes through a phone speaker or mic).
+    for (int k = 4; k >= 2; --k) {
+        int t0 = int(std::lround(float(tau) / k));
+        if (t0 < std::max(2, minLag_)) continue;
+        int best = t0;
+        for (int t = std::max(2, t0 - 2); t <= std::min(maxLag_ - 1, t0 + 2); ++t)
+            if (cmnd_[t] < cmnd_[best]) best = t;
+        if (cmnd_[best] < std::max(0.2f, cmnd_[tau] * 1.5f)) {
+            while (best + 1 < maxLag_ && cmnd_[best + 1] < cmnd_[best]) ++best;
+            while (best - 1 > std::max(2, minLag_) && cmnd_[best - 1] < cmnd_[best]) --best;
+            tau = best;
+            break;
+        }
+    }
     // parabolic interpolation around the minimum for sub-sample precision
     float betterTau = float(tau);
     if (tau > 1 && tau < maxLag_) {

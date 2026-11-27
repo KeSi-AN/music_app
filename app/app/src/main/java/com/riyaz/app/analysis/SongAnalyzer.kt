@@ -148,7 +148,7 @@ class SongAnalyzer(private val context: Context) {
     // ---------------------------------------------------------------- BTC
 
     private fun runBtc(cqt: FloatBuffer, frames: Int): FloatArray {
-        val env = OrtEnvironment.getEnvironment()
+        val env = Ort.env
         val bytes = context.assets.open(MODEL).use { it.readBytes() }
         val opts = OrtSession.SessionOptions().apply { setIntraOpNumThreads(4) }
         val probs = FloatArray(frames * CLASSES)

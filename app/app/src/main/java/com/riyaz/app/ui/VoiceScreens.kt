@@ -126,7 +126,7 @@ fun TunerScreen(onBack: () -> Unit) {
             WithMicrophone {
                 ListenWhileVisible { frames ->
                     for (f in frames) if (f.voiced) {
-                        recent.addLast(f.hz); if (recent.size > 10) recent.removeFirst()
+                        recent.addLast(f.hz); if (recent.size > 12) recent.removeFirst()
                         lastVoiced = f.tMs
                     }
                     // median of the last ~10 readings: steady, but follows a new string within ~0.2 s
@@ -138,12 +138,15 @@ fun TunerScreen(onBack: () -> Unit) {
                     FilterChip(selected = !guitar, onClick = { guitar = false }, label = { Text("Chromatic") })
                 }
                 val midi = if (shownHz > 0) Notes.midi(shownHz, a4) else null
-                val target: Int? = midi?.let { m -> if (guitar) GUITAR.minByOrNull { abs(it.first - m) }!!.first else m.roundToInt() }
+                // the big note is always the nearest note; in guitar mode the string lights up when you're
+                // within a semitone of it, and then the needle measures against that string
+                val string: Int? = midi?.let { m -> GUITAR.minByOrNull { abs(it.first - m) }!!.first.takeIf { abs(it - m) <= 1.0f } }
+                val target: Int? = midi?.let { m -> if (guitar && string != null) string else m.roundToInt() }
                 val cents = if (midi != null && target != null) ((midi - target) * 100f).coerceIn(-50f, 50f) else null
                 if (guitar) {
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         GUITAR.forEach { (m, label) ->
-                            val active = m == target
+                            val active = m == string
                             Text(label, fontSize = 22.sp, fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
                                 color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                         }
@@ -240,7 +243,8 @@ fun VoiceTestScreen(current: VoiceProfile?, onSave: (VoiceProfile) -> Unit, onBa
                         for (f in frames) {
                             val m = f.midi()
                             trace.add(m); if (trace.size > 320) trace.removeAt(0)
-                            if (m != null) recorded[stepIndex].add(m)
+                            // the last readings can arrive just after the final step ended
+                            if (m != null && stepIndex in 0..2) recorded[stepIndex].add(m)
                         }
                     }
                     LaunchedEffect(stepIndex) {

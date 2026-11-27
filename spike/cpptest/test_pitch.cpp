@@ -12,11 +12,11 @@ int main() {
     std::mt19937 rng(1);
     std::normal_distribution<float> noise(0, 1);
     int fails = 0;
-    auto check = [&](const char *name, double f0, int harmonics, float noiseAmp) {
+    auto check = [&](const char *name, double f0, int harmonics, float noiseAmp, int firstHarmonic = 1) {
         std::vector<float> x(sr);   // 1 s
         for (int i = 0; i < sr; ++i) {
             double v = 0;
-            for (int h = 1; h <= harmonics; ++h) v += std::sin(2 * M_PI * f0 * h * i / sr) / h;
+            for (int h = firstHarmonic; h <= harmonics; ++h) v += std::sin(2 * M_PI * f0 * h * i / sr) / h;
             x[i] = float(0.3 * v) + noiseAmp * noise(rng);
         }
         PitchDetector pd;
@@ -48,6 +48,9 @@ int main() {
     check("soprano high A5", 880.0, 4, 0.0f);
     check("detuned +12 cents", 440.0 * std::pow(2.0, 12 / 1200.0), 3, 0);
     check("noise only", 0, 0, 0.2f);
+    check("G3, weak fundamental", 196.0, 6, 0.01f, 2);
+    check("A2, no fundamental", 110.0, 8, 0.01f, 2);
+    check("E2, no fundamental", 82.41, 8, 0.01f, 2);
     printf("%s\n", fails ? "SOME FAILED" : "all ok");
     return fails;
 }
