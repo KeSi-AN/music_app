@@ -69,7 +69,7 @@ import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PlayerScreen(vm: PlayerViewModel) {
+fun PlayerScreen(vm: PlayerViewModel, onSongSheet: () -> Unit = {}) {
     val s by vm.state.collectAsState()
     val song = s.song ?: return
     BackHandler(onBack = vm::showHome)
@@ -103,7 +103,7 @@ fun PlayerScreen(vm: PlayerViewModel) {
                 Spacer(Modifier.width(8.dp))
                 Text(if (s.karaoke.backingReady) "Karaoke" else "Karaoke: sing along with lyrics")
             }
-            ChordSection(vm, song, s.analysis, s.analyzing, s.analysisError)
+            ChordSection(vm, song, s.analysis, s.analyzing, s.analysisError, s.makingSheet, onSongSheet)
             s.fit?.let { FitCard(it, song, vm) }
             KeyCard(song, vm)
             SpeedCard(song, vm)

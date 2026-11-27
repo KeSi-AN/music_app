@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Link
@@ -153,7 +154,7 @@ fun HomeScreen(vm: PlayerViewModel) {
             }
 
             if (search.searchedFor == null && !search.searching) {
-                item { ToolsRow(s.voice, s.learned, onTuner = { vm.openTool(Tool.TUNER) }, onVoice = { vm.openTool(Tool.VOICE_TEST) }) }
+                item { ToolsRow(s.voice, s.learned, onTuner = { vm.openTool(Tool.TUNER) }, onVoice = { vm.openTool(Tool.VOICE_TEST) }, onSongbook = { vm.openTool(Tool.SONGBOOK) }) }
             }
 
             if (search.searchedFor != null && !search.searching) {
@@ -182,25 +183,34 @@ fun HomeScreen(vm: PlayerViewModel) {
 }
 
 @Composable
-private fun ToolsRow(voice: VoiceProfile?, learned: com.riyaz.app.voice.LearnedVoice, onTuner: () -> Unit, onVoice: () -> Unit) {
+private fun ToolsRow(voice: VoiceProfile?, learned: com.riyaz.app.voice.LearnedVoice, onTuner: () -> Unit, onVoice: () -> Unit, onSongbook: () -> Unit) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Card(onClick = onTuner, modifier = Modifier.weight(1f)) {
             Column(Modifier.padding(14.dp)) {
                 Icon(Icons.Default.Tune, null, tint = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.height(6.dp))
                 Text("Tuner", style = MaterialTheme.typography.titleSmall)
-                Text("Guitar or any note", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Any note", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         Card(onClick = onVoice, modifier = Modifier.weight(1f)) {
             Column(Modifier.padding(14.dp)) {
                 Icon(Icons.Default.RecordVoiceOver, null, tint = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.height(6.dp))
-                Text("My voice", style = MaterialTheme.typography.titleSmall)
+                Text("My voice", style = MaterialTheme.typography.titleSmall, maxLines = 1)
                 Text(
                     com.riyaz.app.voice.effectiveRange(voice, learned)?.let { (lo, hi) -> "${Notes.name(lo)} – ${Notes.name(hi)}" + if (learned.sessions > 0) " · ${learned.sessions} songs" else "" } ?: "Find your range",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
                 )
+            }
+        }
+        Card(onClick = onSongbook, modifier = Modifier.weight(1f)) {
+            Column(Modifier.padding(14.dp)) {
+                Icon(Icons.AutoMirrored.Filled.MenuBook, null, tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.height(6.dp))
+                Text("Songbook", style = MaterialTheme.typography.titleSmall, maxLines = 1)
+                Text("Chord sheets", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }

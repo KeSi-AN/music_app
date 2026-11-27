@@ -20,6 +20,9 @@ import com.riyaz.app.fit.KeySuggestion
 import com.riyaz.app.fit.SongUnderstanding
 import com.riyaz.app.fit.Understanding
 import com.riyaz.app.karaoke.VocalSeparator
+import com.riyaz.app.lyrics.Romanization
+import com.riyaz.app.songbook.Sheet
+import com.riyaz.app.songbook.SongSheet
 import com.riyaz.app.voice.effectiveRange
 import com.riyaz.app.voice.VoiceProfile
 import com.riyaz.app.voice.LearnedVoice
@@ -84,12 +87,13 @@ data class PlayerState(
     val habits: KeyHabits = KeyHabits(),
     val karaoke: KaraokeState = KaraokeState(),
     val fit: FitState? = null,
+    val makingSheet: Boolean = false,      // building a chord sheet from the song (may fetch lyrics first)
 )
 
 /** Phase 6: what Riyaz understood about the song and the key it suggests for you ([needs] says what's missing). */
 data class FitState(val understanding: SongUnderstanding, val suggestion: KeySuggestion?, val needs: String?)
 
-enum class Tool { TUNER, VOICE_TEST }
+enum class Tool { TUNER, VOICE_TEST, SONGBOOK }
 
 data class KaraokeState(
     val backingReady: Boolean = false,
@@ -185,9 +189,9 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     // ------------------------------------------------------------------ navigation
 
-    /** Tuner / voice test: the microphone would hear the speaker, so playback pauses. */
+    /** Tuner / voice test: the microphone would hear the speaker, so playback pauses (the songbook can play along). */
     fun openTool(t: Tool) {
-        pause()
+        if (t != Tool.SONGBOOK) pause()
         _state.update { it.copy(tool = t) }
     }
 
@@ -611,6 +615,50 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         // keep what was tapped so far
         k.lyrics?.let { l -> viewModelScope.launch(Dispatchers.IO) { LyricsStore.save(library.dir(song), l) } }
         updateKaraoke(song) { it.copy(syncing = false) }
+    }
+
+    // ------------------------------------------------------------------ songbook (Phase 7)
+
+    /** Opens a library song by id (to play along with its chord sheet); false if it's no longer in the library. */
+    fun openSongById(id: String): Boolean {
+        if (_state.value.song?.id == id) return true
+        val song = _state.value.recent.firstOrNull { it.id == id } ?: return false
+        openRecent(song)
+        return true
+    }
+
+    /**
+     * Writes the current song's chords as a chord sheet, over its lyrics (fetched first if they haven't
+     * been), in the key and capo you use for it.
+     */
+    fun makeSongSheet(done: (Sheet?) -> Unit) {
+        val start = _state.value
+        val song = start.song ?: return done(null)
+        val analysis = start.analysis ?: return done(null)
+        if (start.makingSheet) return
+        _state.update { it.copy(makingSheet = true) }
+        viewModelScope.launch {
+            try {
+                val q = LyricsService.queryFor(song.title, song.artist)
+                var lyrics = _state.value.karaoke.lyrics
+                if (lyrics == null) lyrics = runCatching {
+                    withContext(Dispatchers.IO) {
+                        LyricsService.fetch(LyricsService.Query(q.title, q.artist), song.durationMs / 1000.0)
+                            ?.also { LyricsStore.save(library.dir(song), it) }
+                    }
+                }.getOrNull()
+                if (lyrics != null) updateKaraoke(song) { it.copy(lyrics = lyrics) }
+                val text = withContext(Dispatchers.Default) {
+                    SongSheet.build(q.title, q.artist ?: song.artist, analysis, lyrics, song.durationMs / 1000.0) {
+                        Romanization.instance.romanize(it)
+                    }
+                }
+                done(Sheet(Sheet.newId(), q.title, q.artist ?: song.artist ?: "", text, transpose = song.semitones,
+                    capo = song.capo, simplify = song.simplifyChords, songId = song.id))
+            } finally {
+                _state.update { it.copy(makingSheet = false) }
+            }
+        }
     }
 
     // ------------------------------------------------------------------ auto-fit (Phase 6)

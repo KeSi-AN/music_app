@@ -19,7 +19,11 @@ import androidx.core.content.IntentCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import com.riyaz.app.songbook.ChordSheetParser
+import com.riyaz.app.songbook.SongbookViewModel
 import com.riyaz.app.ui.HomeScreen
+import com.riyaz.app.ui.SongbookScreen
+import com.riyaz.app.youtube.YouTube
 import com.riyaz.app.ui.KaraokeScreen
 import com.riyaz.app.ui.TunerScreen
 import com.riyaz.app.ui.VoiceTestScreen
@@ -29,6 +33,7 @@ import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private val vm: PlayerViewModel by viewModels()
+    private val sb: SongbookViewModel by viewModels()
 
     // Headphones unplugged / Bluetooth disconnected: pause instead of blasting the speaker.
     private val noisyReceiver = object : BroadcastReceiver() {
@@ -63,8 +68,9 @@ class MainActivity : ComponentActivity() {
                 when {
                     s.tool == Tool.TUNER -> TunerScreen(onBack = vm::closeTool)
                     s.tool == Tool.VOICE_TEST -> VoiceTestScreen(s.voice, onSave = vm::saveVoiceProfile, onBack = vm::closeTool)
+                    s.tool == Tool.SONGBOOK -> SongbookScreen(sb, vm, onClose = vm::closeTool)
                     s.showKaraoke && s.song != null -> KaraokeScreen(vm)
-                    s.showPlayer && s.song != null -> PlayerScreen(vm)
+                    s.showPlayer && s.song != null -> PlayerScreen(vm, onSongSheet = ::openSongSheet)
                     else -> HomeScreen(vm)
                 }
             }
@@ -82,15 +88,31 @@ class MainActivity : ComponentActivity() {
      */
     private fun handleIntent(intent: Intent?) {
         when (intent?.action) {
-            Intent.ACTION_VIEW -> intent.data?.let(vm::open)
+            Intent.ACTION_VIEW -> intent.data?.let { uri ->
+                // a chord sheet file (.txt / .cho) goes to the songbook; anything else is a song
+                if (contentResolver.getType(uri)?.startsWith("text/") == true) { sb.importFile(uri); vm.openTool(Tool.SONGBOOK) }
+                else vm.open(uri)
+            }
             Intent.ACTION_SEND -> {
                 val uri = IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
                 val text = intent.getStringExtra(Intent.EXTRA_TEXT)
                 when {
                     uri != null -> vm.open(uri)
+                    !text.isNullOrBlank() && YouTube.findLink(text) == null && ChordSheetParser.looksLikeSheet(text) -> {
+                        sb.importText(text); vm.openTool(Tool.SONGBOOK)
+                    }
                     !text.isNullOrBlank() -> vm.handleSharedText(text)
                 }
             }
+        }
+    }
+
+    /** The song's chord sheet: the one already in the songbook, or a new one from its chords and lyrics. */
+    private fun openSongSheet() {
+        val song = vm.state.value.song ?: return
+        sb.state.value.sheets.firstOrNull { it.songId == song.id }?.let { sb.open(it.id); vm.openTool(Tool.SONGBOOK); return }
+        vm.makeSongSheet { sheet ->
+            if (sheet != null) { sb.openForSong(song.id) { sheet }; vm.openTool(Tool.SONGBOOK) }
         }
     }
 

@@ -58,10 +58,17 @@ private class ChordView(song: Song, analysis: SongAnalysis) {
 }
 
 @Composable
-fun ChordSection(vm: PlayerViewModel, song: Song, analysis: SongAnalysis?, analyzing: Float?, analysisError: String?) {
+fun ChordSection(vm: PlayerViewModel, song: Song, analysis: SongAnalysis?, analyzing: Float?, analysisError: String?,
+                 makingSheet: Boolean = false, onSheet: (() -> Unit)? = null) {
     Card {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("Chords", style = MaterialTheme.typography.titleMedium)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Chords", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                if (analysis != null && onSheet != null) {
+                    if (makingSheet) androidx.compose.material3.CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                    else androidx.compose.material3.TextButton(onClick = onSheet) { Text("Chord sheet") }
+                }
+            }
             when {
                 analysis != null -> ChordContent(vm, song, analysis)
                 analysisError != null -> Text(analysisError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)

@@ -27,6 +27,13 @@ These are outside the phase plan (`BUILD_PLAN.md`). Newest first within each sec
   - A new song, never changed by you, gets the fit filled in once its karaoke track is made.
   - If you keep moving the suggested key the same way (for example 1 lower), after three songs the suggestion includes that habit.
 
+### Try Phase 7 (songbook)
+- **What to try:**
+  1. Copy a chord sheet from a website or WhatsApp and share it to Riyaz (or Songbook, then Paste).
+  2. Open a song in Riyaz, tap **Chord sheet** next to "Chords", then play it from the sheet's play button: the sheet scrolls along with the song.
+  3. Make a setlist and step through it.
+- **Checked on the phone on 2026-11-27** with Vellake, Uska Hi Bana and a pasted Ultimate Guitar-style sheet. All test sheets and the test setlist were then removed.
+
 ## Fixes
 
 ### Slow first load of a new song
@@ -54,7 +61,8 @@ These are outside the phase plan (`BUILD_PLAN.md`). Newest first within each sec
 ### Chords over the lyrics in karaoke (Ultimate Guitar style)
 - **Want:** a toggle on the karaoke screen that shows each chord above the word where it changes, like a chord sheet. It follows your key, capo and Simple settings, and the current line stays highlighted.
 - **How:** the chord timeline (Phase 2) and the line timings (synced or tapped) already exist.
-  - Start by placing each chord change along its line in proportion to its time.
+  - **Partly done in Phase 7:** the songbook's "Chord sheet" button already places each chord over the word where it changes (in proportion to its time along the line) and follows the song while it plays. What's left is showing that inside the karaoke screen itself.
+  - Tapped timings aren't used yet: the generator only uses lyrics that came synced from LRCLIB.
   - For exact word positions, align words to the audio. Whisper with word timestamps would do it; so would the user tapping words.
 - **Needs:** timed lyrics. For untimed lyrics, show the line's chords as a row of names above it.
 
