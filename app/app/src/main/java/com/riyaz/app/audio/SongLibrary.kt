@@ -31,6 +31,8 @@ data class Song(
     val simplifyChords: Boolean = false,
     /** The beat tracker sometimes counts double or half time; the user can correct the BPM shown. */
     val bpmFactor: Float = 1f,
+    /** Karaoke vocal level when the instrumental exists: 0 = no vocals, 1 = the original recording. */
+    val vocalLevel: Float = 1f,
 ) {
     val durationMs: Long get() = frames * 1000L / sampleRate
 }
@@ -187,6 +189,7 @@ class SongLibrary(private val context: Context) {
             .put("lastOpened", song.lastOpened)
             .put("sourceUrl", song.sourceUrl ?: "").put("thumbnailUrl", song.thumbnailUrl ?: "")
             .put("capo", song.capo).put("simplifyChords", song.simplifyChords).put("bpmFactor", song.bpmFactor.toDouble())
+            .put("vocalLevel", song.vocalLevel.toDouble())
         File(dir, "meta.json").writeText(j.toString(2))
     }
 
@@ -214,6 +217,7 @@ class SongLibrary(private val context: Context) {
             capo = j.optInt("capo"),
             simplifyChords = j.optBoolean("simplifyChords"),
             bpmFactor = j.optDouble("bpmFactor", 1.0).toFloat(),
+            vocalLevel = j.optDouble("vocalLevel", 1.0).toFloat(),
         )
     }
 

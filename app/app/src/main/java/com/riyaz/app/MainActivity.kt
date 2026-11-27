@@ -20,6 +20,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.riyaz.app.ui.HomeScreen
+import com.riyaz.app.ui.KaraokeScreen
 import com.riyaz.app.ui.PlayerScreen
 import com.riyaz.app.ui.RiyazTheme
 import kotlinx.coroutines.launch
@@ -57,7 +58,11 @@ class MainActivity : ComponentActivity() {
         setContent {
             RiyazTheme {
                 val s by vm.state.collectAsState()
-                if (s.showPlayer && s.song != null) PlayerScreen(vm) else HomeScreen(vm)
+                when {
+                    s.showKaraoke && s.song != null -> KaraokeScreen(vm)
+                    s.showPlayer && s.song != null -> PlayerScreen(vm)
+                    else -> HomeScreen(vm)
+                }
             }
         }
     }

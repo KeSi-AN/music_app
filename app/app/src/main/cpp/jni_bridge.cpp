@@ -5,6 +5,7 @@
 #include <string>
 
 #include "analysis.h"
+#include "separation.h"
 #include "audio_engine.h"
 
 // One engine for the whole app; NativeEngine.kt is a Kotlin object wrapping these calls.
@@ -27,6 +28,15 @@ JNIEXPORT jboolean JNICALL FN(nativeLoad)(JNIEnv *env, jobject, jstring path, ji
 }
 
 JNIEXPORT void JNICALL FN(nativeUnload)(JNIEnv *, jobject) { engine().unload(); }
+
+JNIEXPORT jboolean JNICALL FN(nativeLoadBacking)(JNIEnv *env, jobject, jstring path) {
+    const char *p = env->GetStringUTFChars(path, nullptr);
+    std::string s(p);
+    env->ReleaseStringUTFChars(path, p);
+    return engine().loadBacking(s) ? JNI_TRUE : JNI_FALSE;
+}
+JNIEXPORT void JNICALL FN(nativeUnloadBacking)(JNIEnv *, jobject) { engine().unloadBacking(); }
+JNIEXPORT void JNICALL FN(nativeSetVocalGain)(JNIEnv *, jobject, jfloat g) { engine().setVocalGain(g); }
 JNIEXPORT jboolean JNICALL FN(nativePlay)(JNIEnv *, jobject) { return engine().play() ? JNI_TRUE : JNI_FALSE; }
 JNIEXPORT void JNICALL FN(nativePause)(JNIEnv *, jobject) { engine().pause(); }
 JNIEXPORT void JNICALL FN(nativeSeek)(JNIEnv *, jobject, jlong frame) { engine().seek(frame); }
@@ -61,5 +71,40 @@ JNIEXPORT jfloatArray JNICALL FN(nativeComputeFeatures)(JNIEnv *env, jobject, js
 }
 
 JNIEXPORT jfloat JNICALL FN(nativeAnalysisProgress)(JNIEnv *, jobject) { return gAnalysisProgress.load(); }
+
+// ---- vocal separation (MDX-Net). Signal processing here; the model runs in Kotlin.
+
+JNIEXPORT jlong JNICALL FN(nativeMdxOpen)(JNIEnv *env, jobject, jstring path, jint songRate, jint nFft, jint dimF) {
+    const char *p = env->GetStringUTFChars(path, nullptr);
+    std::string s(p);
+    env->ReleaseStringUTFChars(path, p);
+    auto *job = new riyaz::MdxJob();
+    if (!job->open(s, songRate, nFft, dimF)) { delete job; return 0; }
+    return reinterpret_cast<jlong>(job);
+}
+JNIEXPORT jint JNICALL FN(nativeMdxChunks)(JNIEnv *, jobject, jlong h) {
+    return reinterpret_cast<riyaz::MdxJob *>(h)->chunks();
+}
+JNIEXPORT void JNICALL FN(nativeMdxInput)(JNIEnv *env, jobject, jlong h, jint k, jfloatArray out) {
+    auto *job = reinterpret_cast<riyaz::MdxJob *>(h);
+    jfloat *p = env->GetFloatArrayElements(out, nullptr);
+    job->input(k, p);
+    env->ReleaseFloatArrayElements(out, p, 0);
+}
+JNIEXPORT void JNICALL FN(nativeMdxOutput)(JNIEnv *env, jobject, jlong h, jint k, jfloatArray pred) {
+    auto *job = reinterpret_cast<riyaz::MdxJob *>(h);
+    jfloat *p = env->GetFloatArrayElements(pred, nullptr);
+    job->output(k, p);
+    env->ReleaseFloatArrayElements(pred, p, JNI_ABORT);
+}
+JNIEXPORT jboolean JNICALL FN(nativeMdxWriteBacking)(JNIEnv *env, jobject, jlong h, jstring path, jfloat compensate) {
+    const char *p = env->GetStringUTFChars(path, nullptr);
+    std::string s(p);
+    env->ReleaseStringUTFChars(path, p);
+    return reinterpret_cast<riyaz::MdxJob *>(h)->writeBacking(s, compensate) ? JNI_TRUE : JNI_FALSE;
+}
+JNIEXPORT void JNICALL FN(nativeMdxClose)(JNIEnv *, jobject, jlong h) {
+    delete reinterpret_cast<riyaz::MdxJob *>(h);
+}
 
 }  // extern "C"

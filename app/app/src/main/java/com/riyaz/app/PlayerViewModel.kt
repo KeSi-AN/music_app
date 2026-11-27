@@ -14,6 +14,11 @@ import com.riyaz.app.analysis.AnalysisStore
 import com.riyaz.app.analysis.SongAnalysis
 import com.riyaz.app.analysis.SongAnalyzer
 import com.riyaz.app.audio.NativeEngine
+import com.riyaz.app.karaoke.VocalSeparator
+import com.riyaz.app.lyrics.LyricLine
+import com.riyaz.app.lyrics.Lyrics
+import com.riyaz.app.lyrics.LyricsService
+import com.riyaz.app.lyrics.LyricsStore
 import com.riyaz.app.audio.Song
 import com.riyaz.app.audio.SongLibrary
 import com.riyaz.app.youtube.YouTube
@@ -54,6 +59,20 @@ data class PlayerState(
     val analysis: SongAnalysis? = null,
     val analyzing: Float? = null,          // progress while chords are being worked out
     val analysisError: String? = null,
+    val showKaraoke: Boolean = false,
+    val karaoke: KaraokeState = KaraokeState(),
+)
+
+data class KaraokeState(
+    val backingReady: Boolean = false,
+    val preparing: Busy? = null,           // making the instrumental
+    val error: String? = null,
+    val lyrics: Lyrics? = null,
+    val lyricsLoading: Boolean = false,
+    val lyricsMessage: String? = null,     // "no lyrics found" etc.
+    val lyricsQuery: String = "",
+    val syncing: Boolean = false,          // tap-along mode for unsynced lyrics
+    val syncNext: Int = 0,                 // next line to stamp
 )
 
 private const val TAG = "Riyaz"
@@ -73,6 +92,9 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private var openJob: Job? = null
     private var analysisJob: Job? = null
     private val analyzer = SongAnalyzer(app)
+    private var prepareJob: Job? = null
+    private var lyricsJob: Job? = null
+    private val separator = VocalSeparator(app)
 
     private val focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
         .setAudioAttributes(
@@ -248,9 +270,143 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         _positionMs.value = 0
         _state.update {
             it.copy(song = song, peaks = peaks, playing = false, error = null, showPlayer = true,
-                analysis = null, analyzing = null, analysisError = null)
+                analysis = null, analyzing = null, analysisError = null, karaoke = KaraokeState())
         }
         startAnalysis(song)
+        attachBacking(song)
+        viewModelScope.launch {
+            val saved = withContext(Dispatchers.IO) { LyricsStore.load(library.dir(song)) }
+            if (saved != null) updateKaraoke(song) { it.copy(lyrics = saved) }
+        }
+    }
+
+    // ------------------------------------------------------------------ karaoke
+
+    private fun updateKaraoke(song: Song, change: (KaraokeState) -> KaraokeState) =
+        _state.update { if (it.song?.id == song.id) it.copy(karaoke = change(it.karaoke)) else it }
+
+    private suspend fun attachBacking(song: Song) {
+        val f = VocalSeparator.backingFile(library.dir(song))
+        val ok = f.exists() && withContext(Dispatchers.IO) { NativeEngine.nativeLoadBacking(f.absolutePath) }
+        NativeEngine.nativeSetVocalGain(if (ok) song.vocalLevel else 1f)
+        updateKaraoke(song) { it.copy(backingReady = ok) }
+    }
+
+    fun openKaraoke() {
+        val song = _state.value.song ?: return
+        _state.update { it.copy(showKaraoke = true) }
+        val k = _state.value.karaoke
+        if (k.lyrics == null && !k.lyricsLoading && k.lyricsMessage == null) {
+            val q = LyricsService.queryFor(song.title, song.artist)
+            fetchLyrics(listOfNotNull(q.title, q.artist).joinToString(" - "))
+        }
+    }
+
+    fun closeKaraoke() = _state.update { it.copy(showKaraoke = false) }
+
+    /** Makes the instrumental (downloads the model the first time). Runs in the background. */
+    fun prepareKaraoke() {
+        val song = _state.value.song ?: return
+        if (prepareJob?.isActive == true) return
+        updateKaraoke(song) { it.copy(preparing = Busy("Getting ready…", null, null), error = null) }
+        prepareJob = viewModelScope.launch {
+            val job = coroutineContext[Job]
+            val cancelled = { job?.isCancelled == true }
+            try {
+                withContext(Dispatchers.IO) {
+                    if (!separator.modelReady) {
+                        updateKaraoke(song) { it.copy(preparing = Busy("Downloading the vocal remover (30 MB, once)…", null, 0f)) }
+                        separator.ensureModel({ p -> updateKaraoke(song) { s -> s.copy(preparing = s.preparing?.copy(progress = p)) } }, cancelled)
+                    }
+                    updateKaraoke(song) { it.copy(preparing = Busy("Removing the vocals…", "Takes a few minutes, once per song. You can keep using the app.", 0f)) }
+                    val t0 = SystemClock.elapsedRealtime()
+                    separator.separate(
+                        library.pcmFile(song), song.sampleRate, VocalSeparator.backingFile(library.dir(song)),
+                        { p -> updateKaraoke(song) { s -> s.copy(preparing = s.preparing?.copy(progress = p)) } }, cancelled,
+                    )
+                    Log.i(TAG, "karaoke track for ${song.id}: ${SystemClock.elapsedRealtime() - t0} ms")
+                }
+                // if this song is still open, switch to karaoke straight away (vocals off)
+                if (_state.value.song?.id == song.id) {
+                    updateSong { it.copy(vocalLevel = 0f) }
+                    _state.value.song?.let { attachBacking(it) }
+                }
+                updateKaraoke(song) { it.copy(preparing = null) }
+            } catch (e: CancellationException) {
+                updateKaraoke(song) { it.copy(preparing = null) }
+            } catch (e: Throwable) {
+                Log.e(TAG, "separation failed", e)
+                updateKaraoke(song) { it.copy(preparing = null, error = e.message ?: "Couldn't make the karaoke track") }
+            }
+        }
+    }
+
+    fun cancelPrepareKaraoke() { prepareJob?.cancel() }
+
+    fun setVocalLevel(v: Float) {
+        updateSong { it.copy(vocalLevel = v.coerceIn(0f, 1f)) }
+        if (_state.value.karaoke.backingReady) NativeEngine.nativeSetVocalGain(v.coerceIn(0f, 1f))
+    }
+
+    fun setLyricsQuery(q: String) = _state.value.song?.let { s -> updateKaraoke(s) { it.copy(lyricsQuery = q) } }
+
+    /** Looks lyrics up on LRCLIB. [query] is "title - artist" (artist optional). */
+    fun fetchLyrics(query: String = _state.value.karaoke.lyricsQuery) {
+        val song = _state.value.song ?: return
+        lyricsJob?.cancel()
+        updateKaraoke(song) { it.copy(lyricsLoading = true, lyricsMessage = null, lyricsQuery = query) }
+        lyricsJob = viewModelScope.launch {
+            try {
+                val parts = query.split(" - ", limit = 2)
+                val found = withContext(Dispatchers.IO) {
+                    LyricsService.fetch(LyricsService.Query(parts[0].trim(), parts.getOrNull(1)?.trim()?.ifBlank { null }), song.durationMs / 1000.0)
+                }
+                if (found != null) withContext(Dispatchers.IO) { LyricsStore.save(library.dir(song), found) }
+                updateKaraoke(song) {
+                    it.copy(lyrics = found ?: it.lyrics, lyricsLoading = false,
+                        lyricsMessage = if (found == null) "No lyrics found. Try a different title or artist." else null)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                updateKaraoke(song) { it.copy(lyricsLoading = false, lyricsMessage = "Couldn't reach the lyrics service.") }
+            }
+        }
+    }
+
+    /** Tap-along sync for lyrics without timings (covers, live versions, indie songs). */
+    fun startLyricsSync() {
+        val song = _state.value.song ?: return
+        updateKaraoke(song) { it.copy(syncing = true, syncNext = 0) }
+        seekTo(0)
+        play()
+    }
+
+    fun tapLyricLine() {
+        val song = _state.value.song ?: return
+        val k = _state.value.karaoke
+        val lyrics = k.lyrics ?: return
+        if (!k.syncing || k.syncNext >= lyrics.lines.size) return
+        val t = _positionMs.value / 1000.0
+        val lines = lyrics.lines.mapIndexed { i, l ->
+            when {
+                i < k.syncNext -> l
+                i == k.syncNext -> l.copy(time = t)
+                else -> LyricLine(l.text, null)
+            }
+        }
+        val done = k.syncNext + 1 >= lines.size
+        val updated = lyrics.copy(lines = lines, source = if (done) "lrclib+tap" else lyrics.source)
+        updateKaraoke(song) { it.copy(lyrics = updated, syncNext = k.syncNext + 1, syncing = !done) }
+        if (done) viewModelScope.launch(Dispatchers.IO) { LyricsStore.save(library.dir(song), updated) }
+    }
+
+    fun stopLyricsSync() {
+        val song = _state.value.song ?: return
+        val k = _state.value.karaoke
+        // keep what was tapped so far
+        k.lyrics?.let { l -> viewModelScope.launch(Dispatchers.IO) { LyricsStore.save(library.dir(song), l) } }
+        updateKaraoke(song) { it.copy(syncing = false) }
     }
 
     // ------------------------------------------------------------------ chords

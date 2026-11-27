@@ -65,3 +65,48 @@ That's as good as the librosa reference.
 
 - **BTC large ONNX:** 13.1 MB; 0.45 s for a 5-minute song on one laptop thread.
 - **Exported models:** they match PyTorch to within 1e-5, with identical chord choices.
+
+---
+
+# Phase 3 spike: vocal removal and lyrics
+
+Run on 2026-11-27.
+
+## Vocal removal
+
+**Data:** 10 clips from the MUSDB18 7-second test set, each with its true vocal and accompaniment tracks.
+
+**Score:** SDR in dB (higher is better). The instrumental is the part that matters for karaoke.
+
+| Model | Instrumental | Vocals | Laptop, 4 threads, 5-min song | Size |
+|---|---|---|---|---|
+| MDX Kim_Vocal_2 | 13.8 | 8.5 | about 5.5–7.5 min | 67 MB |
+| MDX Voc_FT | 13.8 | 8.4 | about the same | 67 MB |
+| **MDX UVR_MDXNET_9482** | **13.0** (13.8 with our own pipeline) | 7.7 (9.5) | **about 1.6–2 min** | **30 MB** |
+| HT-Demucs (4 stems; what Chord AI ships) | 12.8 | 9.1 | about 8 min | 84 MB |
+| Open-Unmix large | 12.1 | 6.9 | about 2 min | |
+| MDX Inst_HQ_3 | 12.0 | 7.3 | slowest | 67 MB |
+| Open-Unmix HQ | 10.9 | 5.6 | about 1 min | |
+
+- **int8 quantisation** made MDX slower in ONNX Runtime: 3.1 s per chunk instead of 2.1.
+- **→ Chosen: UVR_MDXNET_9482.** It's downloaded once from the UVR model release and checked against its SHA-256.
+
+## Our own MDX pipeline
+
+`mdx_portable.py` uses UVR's original trimmed-chunk scheme: chunks advance by `chunk − n_fft`, and only the middle of each is kept.
+- **Quality:** 13.8 dB instrumental, 9.5 dB vocals.
+- **Cost:** the same as running with no overlap.
+
+The C++ port (`app/.../separation.cpp`) was checked on Windows with `spike/cpptest`:
+- Spectrogram inputs match numpy to within 3e-5.
+- Reconstructed vocals match to 1e-7.
+- The instrumental file comes out exactly the song's length.
+
+## Lyrics (LRCLIB)
+
+Of 9 of your songs:
+- **Synced lyrics (6):** the mainstream Telugu/Hindi songs.
+- **Plain lyrics only (2):** the indie Somlata songs.
+- **Covers:** they get the original's lyrics, but those are timed for a different recording.
+
+So synced lyrics are used only when the recording lengths match within 3 s. Otherwise the plain text is shown, and you can sync it once by tapping along.

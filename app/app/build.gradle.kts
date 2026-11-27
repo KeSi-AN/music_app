@@ -88,6 +88,9 @@ dependencies {
     // On-device chord recognition (BTC model, see spike/SPIKE_RESULTS.md)
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.31.0")
 
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20250517")   // android.jar's org.json is a stub in unit tests
+
     // Thumbnails
     implementation("io.coil-kt.coil3:coil-compose:3.6.3")
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.6.3")

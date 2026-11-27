@@ -46,6 +46,13 @@ public:
     bool load(const std::string &pcmPath, int sampleRate);
     void unload();
 
+    // Karaoke: an instrumental (backing track) of the same song, same format and length.
+    // Output = backing + vocalGain * (original - backing): 0 = karaoke, 1 = the original recording.
+    bool loadBacking(const std::string &pcmPath);
+    void unloadBacking();
+    void setVocalGain(float g) { vocalGain_ = g < 0 ? 0 : (g > 1 ? 1 : g); }
+    bool hasBacking() const { return backing_.load() != nullptr; }
+
     bool play();
     void pause();
     void seek(int64_t frame);
@@ -85,6 +92,9 @@ private:
     // Source PCM (memory-mapped, interleaved stereo int16)
     const int16_t *pcm_ = nullptr;
     size_t mapLen_ = 0;
+    std::atomic<const int16_t *> backing_{nullptr};
+    size_t backingLen_ = 0;
+    std::atomic<float> vocalGain_{1.0f};
     int64_t frames_ = 0;
     int sampleRate_ = 44100;
 

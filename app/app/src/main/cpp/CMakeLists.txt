@@ -8,6 +8,8 @@ add_library(riyaz SHARED
     jni_bridge.cpp
     render_test.cpp
     analysis.cpp
+    dsp.cpp
+    separation.cpp
 )
 
 target_include_directories(riyaz PRIVATE

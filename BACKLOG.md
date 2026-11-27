@@ -21,6 +21,13 @@ These are outside the phase plan (`BUILD_PLAN.md`). Newest first within each sec
 
 ## Improvements
 
+### Faster or better vocal removal
+- **Now:** MDX 9482 on the phone's CPU. That's about 1.5–2 min per 5-min song on the laptop; the phone time is to be measured.
+- **Options:**
+  - Use the GPU through LiteRT, as Chord AI does: convert the model to TFLite and use the GPU delegate.
+  - Offer the cleaner Kim_Vocal_2 model (13.8 dB, about 4× slower) as a "best quality" choice.
+  - Keep separating when the app goes to the background, using a foreground service.
+
 ### More accurate beats (beat_this)
 - **Now:** beats come from a classic onset + DP tracker. Chords are almost as good on its beats, but on slow songs it often counts **double time**. Naina Morey shows 144 BPM instead of 72; tapping the BPM switches it.
 - **Better:** beat_this, the beat model Chord AI ships. It got the tempo right on all 3 test songs, but in ONNX Runtime it takes 13–27 s per song on the laptop.

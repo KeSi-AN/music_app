@@ -80,9 +80,49 @@ bool AudioEngine::load(const std::string &pcmPath, int sampleRate) {
     return true;
 }
 
+static const int16_t *mapFile(const std::string &path, size_t &len) {
+    int fd = open(path.c_str(), O_RDONLY);
+    if (fd < 0) return nullptr;
+    struct stat st {};
+    if (fstat(fd, &st) != 0 || st.st_size <= 0) { close(fd); return nullptr; }
+    void *map = mmap(nullptr, (size_t)st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    close(fd);
+    if (map == MAP_FAILED) return nullptr;
+    madvise(map, (size_t)st.st_size, MADV_SEQUENTIAL);
+    len = (size_t)st.st_size;
+    return static_cast<const int16_t *>(map);
+}
+
+bool AudioEngine::loadBacking(const std::string &pcmPath) {
+    if (!pcm_) return false;
+    size_t len = 0;
+    const int16_t *m = mapFile(pcmPath, len);
+    if (!m) return false;
+    if (len != mapLen_) {            // must line up sample for sample with the song
+        munmap((void *)m, len);
+        LOGE("backing length %zu != song %zu", len, mapLen_);
+        return false;
+    }
+    unloadBacking();
+    backingLen_ = len;
+    backing_.store(m);
+    return true;
+}
+
+void AudioEngine::unloadBacking() {
+    const int16_t *m = backing_.exchange(nullptr);
+    if (m) {
+        // the worker may be mid-read: give it a moment before unmapping
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        munmap((void *)m, backingLen_);
+        backingLen_ = 0;
+    }
+}
+
 void AudioEngine::unload() {
     playing_ = false;
     stopWorker();
+    unloadBacking();
     closeStream();
     if (pcm_) {
         munmap((void *)pcm_, mapLen_);
@@ -257,11 +297,21 @@ void AudioEngine::doSeek(int64_t target) {
 
 void AudioEngine::readInput(int64_t start, int count) {
     const float scale = 1.0f / 32768.0f;
+    const int16_t *bk = backing_.load();
+    const float g = vocalGain_.load();
     for (int i = 0; i < count; ++i) {
         int64_t f = start + i;
         if (f >= 0 && f < frames_) {
-            inBuf_[0][i] = pcm_[f * kChannels] * scale;
-            inBuf_[1][i] = pcm_[f * kChannels + 1] * scale;
+            float l = pcm_[f * kChannels] * scale;
+            float r = pcm_[f * kChannels + 1] * scale;
+            if (bk && g < 0.999f) {
+                float bl = bk[f * kChannels] * scale;
+                float br = bk[f * kChannels + 1] * scale;
+                l = bl + g * (l - bl);
+                r = br + g * (r - br);
+            }
+            inBuf_[0][i] = l;
+            inBuf_[1][i] = r;
         } else {
             inBuf_[0][i] = 0.0f;
             inBuf_[1][i] = 0.0f;

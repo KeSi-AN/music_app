@@ -26,6 +26,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Forward5
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Remove
@@ -96,6 +98,11 @@ fun PlayerScreen(vm: PlayerViewModel) {
             SongHeader(song)
             PositionSection(vm, song, s.peaks)
             Transport(playing = s.playing, onToggle = vm::togglePlay, onBack = { vm.skip(-5000) }, onFwd = { vm.skip(5000) })
+            FilledTonalButton(onClick = vm::openKaraoke, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Default.Mic, null)
+                Spacer(Modifier.width(8.dp))
+                Text(if (s.karaoke.backingReady) "Karaoke" else "Karaoke: sing along with lyrics")
+            }
             ChordSection(vm, song, s.analysis, s.analyzing, s.analysisError)
             KeyCard(song, vm)
             SpeedCard(song, vm)

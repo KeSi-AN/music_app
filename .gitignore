@@ -10,3 +10,8 @@ spike/onnx/
 spike/chordai_ref/
 spike/now.png
 spike/__pycache__/
+spike/sep/
+spike/cpptest/*.f32
+spike/cpptest/*.pcm
+spike/cpptest/*.exe
+spike/cpptest/*.obj
