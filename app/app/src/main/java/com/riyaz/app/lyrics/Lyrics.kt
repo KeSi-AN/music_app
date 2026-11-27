@@ -79,9 +79,23 @@ object LyricsService {
     }
 
     fun fetch(query: Query, durationSec: Double): Lyrics? {
-        val hits = search(mapOf("track_name" to query.title) + (query.artist?.let { mapOf("artist_name" to it) } ?: emptyMap()))
-            .ifEmpty { search(mapOf("q" to listOfNotNull(query.title, query.artist).joinToString(" "))) }
-            .ifEmpty { search(mapOf("q" to query.title)) }
+        // LRCLIB's free-text search is loose ("Uska Hi Bana" also returns "Hasi"), so every attempt is
+        // filtered to results whose title really resembles the song before anything else is considered.
+        val attempts = listOf(
+            mapOf("track_name" to query.title) + (query.artist?.let { mapOf("artist_name" to it) } ?: emptyMap()),
+            mapOf("track_name" to query.title),
+            mapOf("q" to listOfNotNull(query.title, query.artist).joinToString(" ")),
+            mapOf("q" to query.title),
+        )
+        for (params in attempts) {
+            val relevant = search(params).filter { titleSimilarity(it.optString("trackName"), query.title) >= MIN_TITLE_SIMILARITY }
+            if (relevant.isNotEmpty()) return choose(relevant, durationSec)
+        }
+        return null
+    }
+
+    /** Picks from results that already match the title: synced if the recording length matches, else plain. */
+    fun choose(hits: List<JSONObject>, durationSec: Double): Lyrics? {
         if (hits.isEmpty()) return null
         val synced = hits.filter { it.optString("syncedLyrics").isNotBlank() }
         val exact = synced.minByOrNull { abs(it.optDouble("duration", 0.0) - durationSec) }
@@ -95,6 +109,30 @@ object LyricsService {
         val lines = text.lines().map { it.trim() }.filter { it.isNotEmpty() }.map { LyricLine(it, null) }
         if (lines.isEmpty()) return null
         return Lyrics(lines, "lrclib", any.optString("trackName"), any.optString("artistName"))
+    }
+
+    private const val MIN_TITLE_SIMILARITY = 0.6
+
+    /** 1 = same title. Case, punctuation and spacing are ignored; containment counts as a match. */
+    fun titleSimilarity(a: String, b: String): Double {
+        fun norm(s: String) = s.lowercase().replace(Regex("""[^\p{L}\p{N}]+"""), " ").trim()
+        val x = norm(a)
+        val y = norm(b)
+        if (x.isEmpty() || y.isEmpty()) return 0.0
+        if (x == y) return 1.0
+        val (short, long) = if (x.length <= y.length) x to y else y to x
+        if (short.length >= 4 && long.split(" ").windowed(short.split(" ").size).any { it.joinToString(" ") == short }) return 0.9
+        // Levenshtein ratio
+        val prev = IntArray(long.length + 1) { it }
+        val cur = IntArray(long.length + 1)
+        for (i in 1..short.length) {
+            cur[0] = i
+            for (j in 1..long.length) {
+                cur[j] = minOf(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + if (short[i - 1] == long[j - 1]) 0 else 1)
+            }
+            System.arraycopy(cur, 0, prev, 0, cur.size)
+        }
+        return 1.0 - prev[long.length].toDouble() / long.length
     }
 
     fun parseLrc(lrc: String): List<LyricLine> {

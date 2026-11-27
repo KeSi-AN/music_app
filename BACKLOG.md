@@ -21,8 +21,11 @@ These are outside the phase plan (`BUILD_PLAN.md`). Newest first within each sec
 
 ## Improvements
 
+### Lyrics in Roman script
+LRCLIB gives Hindi lyrics in Devanagari and Telugu lyrics in Telugu script. Many people sing from Romanised lyrics ("Uska hi bana"), so add a switch that transliterates them on the phone.
+
 ### Faster or better vocal removal
-- **Now:** MDX 9482 on the phone's CPU. That's about 1.5–2 min per 5-min song on the laptop; the phone time is to be measured.
+- **Now:** MDX 9482 on the phone's CPU. On the Edge 50 Neo that took 2 min for Vellake (3:37) and 3 min for Uska Hi Bana (4:33), with a peak of about 1.1 GB of memory.
 - **Options:**
   - Use the GPU through LiteRT, as Chord AI does: convert the model to TFLite and use the GPU delegate.
   - Offer the cleaner Kim_Vocal_2 model (13.8 dB, about 4× slower) as a "best quality" choice.

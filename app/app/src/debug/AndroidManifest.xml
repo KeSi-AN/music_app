@@ -4,5 +4,6 @@
         <!-- Debug builds only: lets the test harness render clips over adb. -->
         <receiver android:name=".RenderTestReceiver" android:exported="true" />
         <receiver android:name=".AnalyzeTestReceiver" android:exported="true" />
+        <receiver android:name=".SeparateTestReceiver" android:exported="true" />
     </application>
 </manifest>

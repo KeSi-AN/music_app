@@ -61,7 +61,7 @@ object YouTube {
                     videoId = id,
                     url = item.url,
                     title = item.name,
-                    channel = item.uploaderName,
+                    channel = cleanChannel(item.uploaderName),
                     durationSec = item.duration,
                     thumbnailUrl = item.thumbnails.maxByOrNull { it.width }?.url,
                 )
@@ -72,6 +72,9 @@ object YouTube {
     fun findLink(text: String): String? =
         Regex("""https?://\S+""").findAll(text).map { it.value.trimEnd('.', ',', ')', '"') }
             .firstOrNull { runCatching { service.streamLHFactory.acceptUrl(it) }.getOrDefault(false) }
+
+    /** YouTube Music artist channels are named "Artist - Topic". */
+    fun cleanChannel(name: String?): String? = name?.replace(Regex("""\s*-\s*Topic$""", RegexOption.IGNORE_CASE), "")?.trim()?.ifBlank { null }
 
     fun videoId(url: String): String? = runCatching { service.streamLHFactory.getId(url) }.getOrNull()
 
@@ -95,7 +98,7 @@ object YouTube {
             videoId = info.id,
             url = info.url,
             title = info.name,
-            channel = info.uploaderName,
+            channel = cleanChannel(info.uploaderName),
             thumbnailUrl = info.thumbnails.maxByOrNull { it.width }?.url,
         )
     }

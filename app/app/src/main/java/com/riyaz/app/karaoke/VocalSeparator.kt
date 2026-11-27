@@ -63,20 +63,33 @@ class VocalSeparator(private val context: Context) {
      * Writes [backingOut] (16-bit stereo PCM, same rate and length as the song).
      * [onProgress] gets 0..1; [isCancelled] is checked between chunks.
      */
-    fun separate(pcm: File, sampleRate: Int, backingOut: File, onProgress: (Float) -> Unit, isCancelled: () -> Boolean) {
+    /** Runtime settings, tunable from the debug test hook. */
+    // Measured on the Edge 50 Neo (2026-11-27): the default CPU kernels without the memory arena were
+    // both faster than XNNPACK and peaked at ~1.0 GB instead of 2.1 GB.
+    data class Config(val xnnpack: Boolean = false, val threads: Int = 4, val arena: Boolean = false, val maxChunks: Int = Int.MAX_VALUE)
+
+    fun separate(
+        pcm: File, sampleRate: Int, backingOut: File, onProgress: (Float) -> Unit, isCancelled: () -> Boolean,
+        config: Config = Config(),
+    ) {
         val env = OrtEnvironment.getEnvironment()
         val opts = OrtSession.SessionOptions().apply {
-            setIntraOpNumThreads(4)
-            // XNNPACK is usually faster than ONNX Runtime's default CPU kernels on ARM phones
-            runCatching { addXnnpack(mapOf("intra_op_num_threads" to "4")) }
-                .onFailure { Log.w(TAG, "XNNPACK not available, using the default CPU kernels") }
+            setCPUArenaAllocator(config.arena)
+            if (config.xnnpack) {
+                // XNNPACK runs its own thread pool: keep ONNX Runtime's to 1 so the two don't fight
+                setIntraOpNumThreads(1)
+                runCatching { addXnnpack(mapOf("intra_op_num_threads" to config.threads.toString())) }
+                    .onFailure { Log.w(TAG, "XNNPACK not available, using the default CPU kernels"); setIntraOpNumThreads(config.threads) }
+            } else {
+                setIntraOpNumThreads(config.threads)
+            }
         }
         val handle = NativeEngine.nativeMdxOpen(pcm.absolutePath, sampleRate, N_FFT, DIM_F)
         if (handle == 0L) throw IOException("Couldn't read the song for separation")
         val tmp = File(backingOut.path + ".part")
         try {
             env.createSession(modelFile.absolutePath, opts).use { session ->
-                val chunks = NativeEngine.nativeMdxChunks(handle)
+                val chunks = minOf(NativeEngine.nativeMdxChunks(handle), config.maxChunks)
                 val input = FloatArray(4 * DIM_F * DIM_T)
                 val shape = longArrayOf(1, 4, DIM_F.toLong(), DIM_T.toLong())
                 val t0 = System.nanoTime()
@@ -92,8 +105,9 @@ class VocalSeparator(private val context: Context) {
                     }
                     onProgress((k + 1).toFloat() / chunks * 0.97f)
                 }
-                Log.i(TAG, "separation: $chunks chunks in ${(System.nanoTime() - t0) / 1_000_000} ms")
+                Log.i(TAG, "separation: $chunks chunks in ${(System.nanoTime() - t0) / 1_000_000} ms ($config)")
             }
+            if (config.maxChunks != Int.MAX_VALUE) return   // timing run only
             if (!NativeEngine.nativeMdxWriteBacking(handle, tmp.absolutePath, COMPENSATE)) throw IOException("Couldn't save the karaoke track")
             tmp.renameTo(backingOut)
             onProgress(1f)

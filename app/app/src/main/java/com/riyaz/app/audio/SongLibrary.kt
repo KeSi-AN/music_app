@@ -204,7 +204,7 @@ class SongLibrary(private val context: Context) {
         return Song(
             id = j.getString("id"),
             title = j.getString("title"),
-            artist = j.optString("artist").ifBlank { null },
+            artist = j.optString("artist").replace(Regex("""\s*-\s*Topic$""", RegexOption.IGNORE_CASE), "").trim().ifBlank { null },
             sampleRate = j.getInt("sampleRate"),
             frames = j.getLong("frames"),
             semitones = j.optInt("semitones"),

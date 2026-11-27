@@ -121,11 +121,16 @@ private fun ChordContent(vm: PlayerViewModel, song: Song, analysis: SongAnalysis
 private fun ChordCard(chord: Chord?, flats: Boolean, big: Boolean, label: String) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        val none = chord == null || chord.isNone
         Text(
-            chord?.name(flats) ?: "–",
+            if (none) "–" else chord!!.name(flats),
             fontSize = if (big) 34.sp else 22.sp,
             fontWeight = FontWeight.Bold,
-            color = if (big) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+            color = when {
+                none -> MaterialTheme.colorScheme.onSurfaceVariant
+                big -> MaterialTheme.colorScheme.primary
+                else -> MaterialTheme.colorScheme.onSurface
+            },
         )
         Spacer(Modifier.height(4.dp))
         val f = chord?.let(GuitarChords::fingering)

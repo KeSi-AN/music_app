@@ -22,6 +22,30 @@ class LyricsQueryTest {
         assertEquals("Armaan Malik", LyricsService.queryFor("Song", "Armaan Malik - Topic").artist)
     }
 
+    @Test fun titleSimilarityRejectsOtherSongs() {
+        // real case: LRCLIB's loose search returned "Hasi" for "Uska Hi Bana", with the same length
+        assert(LyricsService.titleSimilarity("Hasi", "Uska Hi Bana") < 0.6)
+        assert(LyricsService.titleSimilarity("Uska Hi Banana", "Uska Hi Bana") >= 0.6)
+        assert(LyricsService.titleSimilarity("Kaa Karoon Sajni", "Kaa Karoon Sajni") >= 0.99)
+        assert(LyricsService.titleSimilarity("Tum Hi Ho (From \"Aashiqui 2\")", "Tum Hi Ho") >= 0.6)
+        assert(LyricsService.titleSimilarity("Shaayar", "shaayar") >= 0.99)
+    }
+
+    @Test fun choosesSyncedOnlyForSameLength() {
+        fun hit(title: String, dur: Double, synced: String?, plain: String?) = org.json.JSONObject()
+            .put("trackName", title).put("artistName", "x").put("duration", dur)
+            .put("syncedLyrics", synced ?: org.json.JSONObject.NULL).put("plainLyrics", plain ?: org.json.JSONObject.NULL)
+        val original = hit("Uska Hi Banana", 328.0, "[00:10.00] uska hi bana\n[00:14.00] line two", "uska hi bana\nline two")
+        // the cover is 274 s: words but no timings
+        val forCover = LyricsService.choose(listOf(original), 274.0)!!
+        assertEquals(false, forCover.synced)
+        assertEquals(listOf("uska hi bana", "line two"), forCover.lines.map { it.text })
+        // the original recording: synced
+        val forOriginal = LyricsService.choose(listOf(original), 327.0)!!
+        assertEquals(true, forOriginal.synced)
+        assertEquals(10.0, forOriginal.lines[0].time!!, 1e-6)
+    }
+
     @Test fun parsesLrc() {
         val l = LyricsService.parseLrc("[ar:x]\n[00:07.10] first\n[00:10.94]second\n[00:12.00]\n[01:02.5][01:30.25] chorus")
         assertEquals(listOf("first", "second", "chorus", "chorus"), l.map { it.text })
