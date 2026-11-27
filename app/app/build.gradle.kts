@@ -46,6 +46,11 @@ android {
         prefab = true
     }
 
+    packaging {
+        // Compress native libraries in the APK (ONNX Runtime alone is 34 MB uncompressed).
+        jniLibs { useLegacyPackaging = true }
+    }
+
     externalNativeBuild {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
@@ -79,6 +84,9 @@ dependencies {
     implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.27.1")
     implementation("com.squareup.okhttp3:okhttp:5.5.1")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs_nio:2.1.5")
+
+    // On-device chord recognition (BTC model, see spike/SPIKE_RESULTS.md)
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.31.0")
 
     // Thumbnails
     implementation("io.coil-kt.coil3:coil-compose:3.6.3")

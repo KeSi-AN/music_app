@@ -30,3 +30,6 @@
 }
 
 -keep class org.ocpsoft.prettytime.i18n.Resources* { *; }
+
+# ONNX Runtime calls back into its Java classes from native code
+-keep class ai.onnxruntime.** { *; }

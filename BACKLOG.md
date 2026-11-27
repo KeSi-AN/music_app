@@ -21,6 +21,17 @@ These are outside the phase plan (`BUILD_PLAN.md`). Newest first within each sec
 
 ## Improvements
 
+### More accurate beats (beat_this)
+- **Now:** beats come from a classic onset + DP tracker. Chords are almost as good on its beats, but on slow songs it often counts **double time**. Naina Morey shows 144 BPM instead of 72; tapping the BPM switches it.
+- **Better:** beat_this, the beat model Chord AI ships. It got the tempo right on all 3 test songs, but in ONNX Runtime it takes 13–27 s per song on the laptop.
+- **Options:**
+  - Run it in the background after the chords appear.
+  - Convert it to LiteRT with a GPU delegate, as Chord AI does.
+
+### Smaller app download
+- ONNX Runtime adds about 34 MB, or about 12 MB compressed, to run one 13 MB chord model.
+- **Options:** a reduced-operator ONNX Runtime build, or converting BTC to LiteRT. Either one needs its accuracy re-checked against `spike/score_phone.py`.
+
 ### Keep playing in the background
 - **Now:** pressing Back on the home screen closes the app, and the music stops. Turning the screen off works only because the app keeps the screen awake while playing.
 - **Want:** a media notification with play/pause, and playback that carries on with the screen off or when switching apps (a foreground media service plus a MediaSession). That also gives Bluetooth-headset and lock-screen controls.

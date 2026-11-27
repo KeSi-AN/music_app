@@ -7,6 +7,7 @@ add_library(riyaz SHARED
     audio_engine.cpp
     jni_bridge.cpp
     render_test.cpp
+    analysis.cpp
 )
 
 target_include_directories(riyaz PRIVATE

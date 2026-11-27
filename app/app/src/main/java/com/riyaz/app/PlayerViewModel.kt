@@ -10,6 +10,9 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.riyaz.app.analysis.AnalysisStore
+import com.riyaz.app.analysis.SongAnalysis
+import com.riyaz.app.analysis.SongAnalyzer
 import com.riyaz.app.audio.NativeEngine
 import com.riyaz.app.audio.Song
 import com.riyaz.app.audio.SongLibrary
@@ -48,6 +51,9 @@ data class PlayerState(
     val recent: List<Song> = emptyList(),
     val showPlayer: Boolean = false,
     val search: SearchState = SearchState(),
+    val analysis: SongAnalysis? = null,
+    val analyzing: Float? = null,          // progress while chords are being worked out
+    val analysisError: String? = null,
 )
 
 private const val TAG = "Riyaz"
@@ -65,6 +71,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     private var searchJob: Job? = null
     private var openJob: Job? = null
+    private var analysisJob: Job? = null
+    private val analyzer = SongAnalyzer(app)
 
     private val focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
         .setAudioAttributes(
@@ -238,7 +246,59 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         applyToEngine(song)
         val peaks = withContext(Dispatchers.IO) { library.overview(song) }
         _positionMs.value = 0
-        _state.update { it.copy(song = song, peaks = peaks, playing = false, error = null, showPlayer = true) }
+        _state.update {
+            it.copy(song = song, peaks = peaks, playing = false, error = null, showPlayer = true,
+                analysis = null, analyzing = null, analysisError = null)
+        }
+        startAnalysis(song)
+    }
+
+    // ------------------------------------------------------------------ chords
+
+    /** Loads the saved analysis, or works it out in the background (playback is unaffected). */
+    private fun startAnalysis(song: Song) {
+        analysisJob?.cancel()
+        analysisJob = viewModelScope.launch {
+            val dir = library.dir(song)
+            val saved = withContext(Dispatchers.IO) { AnalysisStore.load(dir) }
+            if (saved != null) {
+                _state.update { if (it.song?.id == song.id) it.copy(analysis = saved) else it }
+                return@launch
+            }
+            _state.update { it.copy(analyzing = 0f) }
+            // the native feature step reports its own progress; mirror it into the UI
+            val poll = launch {
+                while (isActive) {
+                    val p = NativeEngine.nativeAnalysisProgress() * 0.7f
+                    _state.update { s -> if (s.song?.id == song.id && s.analyzing != null && p > (s.analyzing ?: 0f)) s.copy(analyzing = p) else s }
+                    delay(100)
+                }
+            }
+            try {
+                val result = withContext(Dispatchers.Default) {
+                    analyzer.analyze(library.pcmFile(song).absolutePath, song.sampleRate) { p ->
+                        _state.update { s -> if (s.song?.id == song.id) s.copy(analyzing = p) else s }
+                    }
+                }
+                withContext(Dispatchers.IO) { AnalysisStore.save(dir, result) }
+                _state.update { if (it.song?.id == song.id) it.copy(analysis = result, analyzing = null) else it }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                Log.e(TAG, "analysis failed", e)
+                _state.update { if (it.song?.id == song.id) it.copy(analyzing = null, analysisError = "Couldn't work out the chords for this song.") else it }
+            } finally {
+                poll.cancel()
+            }
+        }
+    }
+
+    fun setCapo(fret: Int) = updateSong { it.copy(capo = fret.coerceIn(0, 9)) }
+    fun setSimplifyChords(on: Boolean) = updateSong { it.copy(simplifyChords = on) }
+
+    /** The beat tracker sometimes counts double or half time: tap the BPM to cycle x1 -> x0.5 -> x2. */
+    fun cycleBpmFactor() = updateSong {
+        it.copy(bpmFactor = when (it.bpmFactor) { 1f -> 0.5f; 0.5f -> 2f; else -> 1f })
     }
 
     // ------------------------------------------------------------------ playback

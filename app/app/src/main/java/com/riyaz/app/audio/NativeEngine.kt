@@ -19,6 +19,13 @@ object NativeEngine {
     external fun nativeIsPlaying(): Boolean
     external fun nativeReachedEnd(): Boolean
 
+    /**
+     * Analysis features for a decoded song: [cqtFrames, envFrames, cqt (cqtFrames x 144, BTC-normalised),
+     * onset envelope (envFrames, 22050/512 fps)]. Slow (seconds): call off the main thread.
+     */
+    external fun nativeComputeFeatures(pcmPath: String, sampleRate: Int): FloatArray?
+    external fun nativeAnalysisProgress(): Float
+
     /** Test harness only: offline render of part of a song with the live key/speed settings. */
     external fun nativeRenderTest(
         pcmPath: String, sampleRate: Int, startFrame: Long, outFrames: Int,

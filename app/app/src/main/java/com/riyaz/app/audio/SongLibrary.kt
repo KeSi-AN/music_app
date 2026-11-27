@@ -25,6 +25,12 @@ data class Song(
     /** Where it came from: a YouTube watch URL, or null for a file on the phone. */
     val sourceUrl: String? = null,
     val thumbnailUrl: String? = null,
+    /** Capo fret for the chord shapes shown (the audio is unaffected). */
+    val capo: Int = 0,
+    /** Show plain major/minor chords instead of 7ths, sus etc. */
+    val simplifyChords: Boolean = false,
+    /** The beat tracker sometimes counts double or half time; the user can correct the BPM shown. */
+    val bpmFactor: Float = 1f,
 ) {
     val durationMs: Long get() = frames * 1000L / sampleRate
 }
@@ -38,6 +44,7 @@ class SongLibrary(private val context: Context) {
     private val root = File(context.filesDir, "songs").apply { mkdirs() }
 
     fun pcmFile(song: Song) = File(File(root, song.id), "audio.pcm")
+    fun dir(song: Song) = File(root, song.id)
 
     fun recent(): List<Song> =
         root.listFiles().orEmpty()
@@ -179,6 +186,7 @@ class SongLibrary(private val context: Context) {
             .put("tempo", song.tempo.toDouble()).put("naturalVoice", song.naturalVoice)
             .put("lastOpened", song.lastOpened)
             .put("sourceUrl", song.sourceUrl ?: "").put("thumbnailUrl", song.thumbnailUrl ?: "")
+            .put("capo", song.capo).put("simplifyChords", song.simplifyChords).put("bpmFactor", song.bpmFactor.toDouble())
         File(dir, "meta.json").writeText(j.toString(2))
     }
 
@@ -203,6 +211,9 @@ class SongLibrary(private val context: Context) {
             lastOpened = j.optLong("lastOpened"),
             sourceUrl = j.optString("sourceUrl").ifBlank { null },
             thumbnailUrl = j.optString("thumbnailUrl").ifBlank { null },
+            capo = j.optInt("capo"),
+            simplifyChords = j.optBoolean("simplifyChords"),
+            bpmFactor = j.optDouble("bpmFactor", 1.0).toFloat(),
         )
     }
 

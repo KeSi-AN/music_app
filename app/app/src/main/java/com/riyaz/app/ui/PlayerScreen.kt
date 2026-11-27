@@ -96,6 +96,7 @@ fun PlayerScreen(vm: PlayerViewModel) {
             SongHeader(song)
             PositionSection(vm, song, s.peaks)
             Transport(playing = s.playing, onToggle = vm::togglePlay, onBack = { vm.skip(-5000) }, onFwd = { vm.skip(5000) })
+            ChordSection(vm, song, s.analysis, s.analyzing, s.analysisError)
             KeyCard(song, vm)
             SpeedCard(song, vm)
             Spacer(Modifier.height(24.dp))
