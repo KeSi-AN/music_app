@@ -46,6 +46,7 @@ data class Song(
  */
 class SongLibrary(private val context: Context) {
     private val root = File(context.filesDir, "songs").apply { mkdirs() }
+    private val memory = com.riyaz.app.backup.SongMemory(context.filesDir)
 
     fun pcmFile(song: Song) = File(File(root, song.id), "audio.pcm")
     fun dir(song: Song) = File(root, song.id)
@@ -177,8 +178,10 @@ class SongLibrary(private val context: Context) {
 
     private fun finish(song: Song): Song {
         save(song)
+        // a song seen before (dropped from the library, or from a backup): bring back its settings and lyrics
+        val restored = if (memory.restoreInto(File(root, song.id))) runCatching { readMeta(File(root, song.id)) }.getOrNull() else null
         evictOld()
-        return song
+        return restored ?: song
     }
 
     fun save(song: Song) {
@@ -198,7 +201,9 @@ class SongLibrary(private val context: Context) {
 
     fun touch(song: Song): Song = song.copy(lastOpened = System.currentTimeMillis()).also { save(it) }
 
+    /** Removes a song's audio; its settings, lyrics, chords and melody are remembered (a few KB). */
     fun delete(song: Song) {
+        runCatching { memory.remember(File(root, song.id)) }
         File(root, song.id).deleteRecursively()
     }
 

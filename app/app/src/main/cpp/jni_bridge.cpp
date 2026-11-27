@@ -8,6 +8,7 @@
 #include "separation.h"
 #include "mic_input.h"
 #include "melody.h"
+#include "transcribe.h"
 #include "audio_engine.h"
 
 // One engine for the whole app; NativeEngine.kt is a Kotlin object wrapping these calls.
@@ -124,6 +125,14 @@ JNIEXPORT jint JNICALL FN(nativeMicPoll)(JNIEnv *env, jobject, jfloatArray out) 
     return n;
 }
 
+JNIEXPORT jint JNICALL FN(nativeMicPollChroma)(JNIEnv *env, jobject, jfloatArray out) {
+    jsize len = env->GetArrayLength(out);
+    jfloat *p = env->GetFloatArrayElements(out, nullptr);
+    int n = gMic.pollChroma(p, len / 13);
+    env->ReleaseFloatArrayElements(out, p, 0);
+    return n;
+}
+
 // ---- song melody from the vocal track (original - instrumental)
 
 static std::atomic<float> gMelodyProgress{0.0f};
@@ -139,5 +148,47 @@ JNIEXPORT jfloatArray JNICALL FN(nativeComputeMelody)(JNIEnv *env, jobject, jstr
     return arr;
 }
 JNIEXPORT jfloat JNICALL FN(nativeMelodyProgress)(JNIEnv *, jobject) { return gMelodyProgress.load(); }
+
+// ---- Whisper (lyrics from the vocal track)
+static std::atomic<float> gTranscribeProgress{0.0f};
+static std::atomic<bool> gTranscribeCancel{false};
+
+// Returns [start, end, text, start, end, text, …] as strings, or null on failure / cancel.
+JNIEXPORT jobjectArray JNICALL FN(nativeTranscribe)(JNIEnv *env, jobject, jstring model, jstring vad, jstring orig, jstring backing,
+                                                    jint sampleRate, jstring language, jint threads) {
+    auto str = [&](jstring s) {
+        if (!s) return std::string();
+        const char *c = env->GetStringUTFChars(s, nullptr); std::string r(c); env->ReleaseStringUTFChars(s, c); return r;
+    };
+    riyaz::TranscribeJob job;
+    job.modelPath = str(model); job.vadModelPath = str(vad); job.originalPcm = str(orig); job.backingPcm = str(backing);
+    job.sampleRate = sampleRate; job.language = str(language); job.threads = threads;
+    gTranscribeProgress = 0.0f;
+    gTranscribeCancel = false;
+    std::vector<riyaz::HeardSegment> segs;
+    if (!riyaz::transcribe(job, segs, &gTranscribeProgress, &gTranscribeCancel)) return nullptr;
+    jclass strCls = env->FindClass("java/lang/String");
+    jobjectArray arr = env->NewObjectArray(jsize(segs.size() * 3), strCls, nullptr);
+    for (size_t i = 0; i < segs.size(); ++i) {
+        char buf[32];
+        snprintf(buf, sizeof buf, "%.2f", segs[i].start);
+        env->SetObjectArrayElement(arr, jsize(3 * i), env->NewStringUTF(buf));
+        snprintf(buf, sizeof buf, "%.2f", segs[i].end);
+        env->SetObjectArrayElement(arr, jsize(3 * i + 1), env->NewStringUTF(buf));
+        // NewStringUTF wants modified UTF-8; Whisper can cut a character in half at a segment edge, so drop broken bytes
+        std::string t; const std::string &x = segs[i].text;
+        for (size_t k = 0; k < x.size();) {
+            unsigned char c = x[k]; int n = c < 0x80 ? 1 : (c >> 5) == 6 ? 2 : (c >> 4) == 14 ? 3 : (c >> 3) == 30 ? 4 : 0;
+            bool ok = n > 0 && k + n <= x.size();
+            for (int q = 1; ok && q < n; ++q) ok = (static_cast<unsigned char>(x[k + q]) & 0xC0) == 0x80;
+            if (ok && n < 4) t.append(x, k, n);
+            k += ok ? n : 1;
+        }
+        env->SetObjectArrayElement(arr, jsize(3 * i + 2), env->NewStringUTF(t.c_str()));
+    }
+    return arr;
+}
+JNIEXPORT jfloat JNICALL FN(nativeTranscribeProgress)(JNIEnv *, jobject) { return gTranscribeProgress.load(); }
+JNIEXPORT void JNICALL FN(nativeTranscribeCancel)(JNIEnv *, jobject) { gTranscribeCancel = true; }
 
 }  // extern "C"

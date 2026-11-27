@@ -104,6 +104,7 @@ fun PlayerScreen(vm: PlayerViewModel, onSongSheet: () -> Unit = {}) {
                 Text(if (s.karaoke.backingReady) "Karaoke" else "Karaoke: sing along with lyrics")
             }
             ChordSection(vm, song, s.analysis, s.analyzing, s.analysisError, s.makingSheet, onSongSheet)
+            if (s.analysis != null) PlayAlongPanel(vm, song, s)
             s.fit?.let { FitCard(it, song, vm) }
             KeyCard(song, vm)
             SpeedCard(song, vm)

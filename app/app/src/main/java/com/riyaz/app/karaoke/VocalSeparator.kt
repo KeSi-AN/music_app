@@ -8,10 +8,7 @@ import android.util.Log
 import com.riyaz.app.audio.NativeEngine
 import java.io.File
 import java.io.IOException
-import java.net.HttpURLConnection
-import java.net.URL
 import java.nio.FloatBuffer
-import java.security.MessageDigest
 
 /**
  * Makes the karaoke (instrumental) track of a song on the phone with the MDX-Net "UVR_MDXNET_9482"
@@ -25,39 +22,8 @@ class VocalSeparator(private val context: Context) {
     val modelReady: Boolean get() = modelFile.length() == MODEL_BYTES
 
     /** Downloads and checks the model if it isn't there yet. */
-    fun ensureModel(onProgress: (Float) -> Unit, isCancelled: () -> Boolean) {
-        if (modelReady) return
-        val part = File(modelFile.path + ".part")
-        val conn = URL(MODEL_URL).openConnection() as HttpURLConnection
-        conn.connectTimeout = 15_000
-        conn.readTimeout = 30_000
-        conn.instanceFollowRedirects = true
-        try {
-            if (conn.responseCode != 200) throw IOException("Model download failed (HTTP ${conn.responseCode})")
-            val md = MessageDigest.getInstance("SHA-256")
-            var done = 0L
-            conn.inputStream.use { input ->
-                part.outputStream().use { out ->
-                    val buf = ByteArray(1 shl 16)
-                    while (true) {
-                        if (isCancelled()) throw kotlinx.coroutines.CancellationException("cancelled")
-                        val n = input.read(buf)
-                        if (n < 0) break
-                        out.write(buf, 0, n)
-                        md.update(buf, 0, n)
-                        done += n
-                        onProgress(done.toFloat() / MODEL_BYTES)
-                    }
-                }
-            }
-            val sha = md.digest().joinToString("") { "%02x".format(it) }
-            if (sha != MODEL_SHA256) throw IOException("The downloaded model is damaged (checksum mismatch)")
-            part.renameTo(modelFile)
-        } finally {
-            conn.disconnect()
-            part.delete()
-        }
-    }
+    fun ensureModel(onProgress: (Float) -> Unit, isCancelled: () -> Boolean) =
+        MODEL.ensure(modelFile.parentFile!!, { onProgress(it.toFloat() / MODEL_BYTES) }, isCancelled)
 
     /**
      * Writes [backingOut] (16-bit stereo PCM, same rate and length as the song).
@@ -123,6 +89,7 @@ class VocalSeparator(private val context: Context) {
         private const val MODEL_URL = "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/UVR_MDXNET_9482.onnx"
         private const val MODEL_BYTES = 29_704_436L
         private const val MODEL_SHA256 = "f4f365207c56deb115bceedff3ad8fe98a751c745f9e370cecec6226b8b47184"
+        private val MODEL = com.riyaz.app.net.ModelFile(MODEL_NAME, MODEL_URL, MODEL_BYTES, MODEL_SHA256)
         private const val N_FFT = 6144
         private const val DIM_F = 2048
         private const val DIM_T = 256

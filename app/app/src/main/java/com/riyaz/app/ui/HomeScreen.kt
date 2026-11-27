@@ -22,6 +22,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FolderOpen
@@ -71,7 +77,7 @@ import androidx.compose.material.icons.filled.Tune
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen(vm: PlayerViewModel) {
+fun HomeScreen(vm: PlayerViewModel, onBackup: () -> Unit = {}, onRestore: () -> Unit = {}) {
     val s by vm.state.collectAsState()
     val search = s.search
     val focus = LocalFocusManager.current
@@ -86,6 +92,14 @@ fun HomeScreen(vm: PlayerViewModel) {
                 actions = {
                     IconButton(onClick = { picker.launch(arrayOf("audio/*", "video/*")) }, enabled = s.busy == null) {
                         Icon(Icons.Default.FolderOpen, contentDescription = "Open a file from the phone")
+                    }
+                    var menu by remember { mutableStateOf(false) }
+                    Box {
+                        IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, contentDescription = "More") }
+                        DropdownMenu(menu, { menu = false }) {
+                            DropdownMenuItem(text = { Text("Back up to a file") }, onClick = { menu = false; onBackup() })
+                            DropdownMenuItem(text = { Text("Restore from a backup") }, onClick = { menu = false; onRestore() })
+                        }
                     }
                 },
             )
@@ -144,6 +158,11 @@ fun HomeScreen(vm: PlayerViewModel) {
                     }
                     s.busy?.let { BusyCard(it, onCancel = vm::cancelOpen) }
                     s.error?.let { ErrorCard(it, vm::dismissError) }
+                    s.notice?.let { msg ->
+                        Card(onClick = vm::dismissNotice, modifier = Modifier.fillMaxWidth()) {
+                            Text(msg, Modifier.padding(14.dp), style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
                     search.error?.let { ErrorCard(it) { vm.setQuery(search.query) } }
                     if (search.searching) {
                         Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {

@@ -42,6 +42,9 @@ class SongbookViewModel(app: Application) : AndroidViewModel(app) {
 
     // ------------------------------------------------------------------ navigation
 
+    /** After a restore: re-read sheets and setlists from disk. */
+    fun reload() = _state.update { it.copy(sheets = store.sheets(), setlists = store.setlists(), screen = SbScreen.Library) }
+
     fun go(screen: SbScreen) = _state.update { it.copy(screen = screen, message = null) }
     fun setTab(t: Int) = _state.update { it.copy(tab = t) }
     fun setQuery(q: String) = _state.update { it.copy(query = q) }

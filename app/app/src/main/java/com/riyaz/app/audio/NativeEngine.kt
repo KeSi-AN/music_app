@@ -44,10 +44,21 @@ object NativeEngine {
     external fun nativeMicStop()
     /** Fills [out] with [hz, clarity, rms] triples since the last call; returns how many (hz = 0: no pitch). */
     external fun nativeMicPoll(out: FloatArray): Int
+    /** Chord check: fills [out] with 13 floats per result (12 note energies C..B, then rms), 10 per second. */
+    external fun nativeMicPollChroma(out: FloatArray): Int
 
     /** Sung melody: fractional MIDI every 20 ms (NaN = no voice), from original - instrumental. Slow. */
     external fun nativeComputeMelody(originalPcm: String, backingPcm: String, sampleRate: Int): FloatArray?
     external fun nativeMelodyProgress(): Float
+
+    /**
+     * Whisper on the vocal track (original - instrumental, or the original if [backingPcm] is null): returns
+     * [start, end, text] triples flattened, or null on failure or cancel. Slow: run off the main thread.
+     */
+    external fun nativeTranscribe(modelPath: String, vadModelPath: String?, originalPcm: String, backingPcm: String?,
+                                  sampleRate: Int, language: String?, threads: Int): Array<String>?
+    external fun nativeTranscribeProgress(): Float
+    external fun nativeTranscribeCancel()
 
     /** Test harness only: offline render of part of a song with the live key/speed settings. */
     external fun nativeRenderTest(

@@ -15,6 +15,8 @@ bool MicInput::start() {
     if (stream_) return true;
     detector_ = PitchDetector();
     read_ = written_.load();
+    chroma_ = ChromaAnalyser();
+    chromaRead_ = chromaWritten_.load();
     for (auto preset : {oboe::InputPreset::Unprocessed, oboe::InputPreset::VoiceRecognition}) {
         oboe::AudioStreamBuilder b;
         b.setDirection(oboe::Direction::Input)
@@ -61,6 +63,12 @@ oboe::DataCallbackResult MicInput::onAudioReady(oboe::AudioStream *, void *audio
             ring_[w % kRing] = r;
             written_.store(w + 1, std::memory_order_release);
         }
+        ChromaAnalyser::Result c;
+        if (chroma_.push(in + done, n, c)) {
+            int64_t w = chromaWritten_.load(std::memory_order_relaxed);
+            chromaRing_[w % kChromaRing] = c;
+            chromaWritten_.store(w + 1, std::memory_order_release);
+        }
         done += n;
     }
     return oboe::DataCallbackResult::Continue;
@@ -85,6 +93,20 @@ int MicInput::poll(float *out, int maxResults) {
         out[3 * n + 1] = r.clarity;
         out[3 * n + 2] = r.rms;
         ++read_;
+        ++n;
+    }
+    return n;
+}
+
+int MicInput::pollChroma(float *out, int maxResults) {
+    int64_t w = chromaWritten_.load(std::memory_order_acquire);
+    if (w - chromaRead_ > kChromaRing) chromaRead_ = w - kChromaRing;
+    int n = 0;
+    while (chromaRead_ < w && n < maxResults) {
+        const auto &r = chromaRing_[chromaRead_ % kChromaRing];
+        std::copy(r.chroma, r.chroma + 12, out + 13 * n);
+        out[13 * n + 12] = r.rms;
+        ++chromaRead_;
         ++n;
     }
     return n;

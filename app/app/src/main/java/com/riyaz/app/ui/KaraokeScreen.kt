@@ -188,6 +188,15 @@ private fun LyricsPanel(vm: PlayerViewModel, k: KaraokeState, modifier: Modifier
     val lyrics = k.lyrics
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         var editing by remember { mutableStateOf(false) }
+        k.listening?.let { b ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(b.label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                TextButton(onClick = vm::cancelListening) { Text("Cancel") }
+            }
+            val p = b.progress
+            if (p == null) LinearProgressIndicator(Modifier.fillMaxWidth())
+            else LinearProgressIndicator(progress = { p }, modifier = Modifier.fillMaxWidth())
+        }
         if (lyrics == null || editing) {
             if (k.lyricsLoading) {
                 Text("Looking for lyrics…", style = MaterialTheme.typography.bodyMedium)
@@ -204,6 +213,12 @@ private fun LyricsPanel(vm: PlayerViewModel, k: KaraokeState, modifier: Modifier
                     FilledTonalButton(onClick = { editing = false; vm.fetchLyrics() }) { Text("Find lyrics") }
                     if (lyrics != null) TextButton(onClick = { editing = false }) { Text("Cancel") }
                 }
+                if (lyrics == null && k.listening == null) {
+                    val mb = vm.whisperDownloadBytes() / 1_000_000
+                    TextButton(onClick = vm::listenForLyrics) {
+                        Text("Or write them out from the singing (a draft)" + if (mb > 0) " · downloads $mb MB once" else "")
+                    }
+                }
             }
             return@Column
         }
@@ -216,19 +231,23 @@ private fun LyricsPanel(vm: PlayerViewModel, k: KaraokeState, modifier: Modifier
             Text(
                 when {
                     k.syncing -> "Tap the button as each line starts"
+                    lyrics.source == "whisper" -> "Written out from the singing: a draft, words may be off"
+                    lyrics.synced && lyrics.source.endsWith("+whisper") -> "Timed from the singing"
                     lyrics.synced -> "Synced lyrics"
                     else -> "Lyrics aren't timed for this recording"
                 },
                 style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f),
             )
             if (!k.syncing) {
-                TextButton(onClick = vm::startLyricsSync) { Text(if (lyrics.synced) "Re-sync" else "Sync") }
+                if (!lyrics.synced && k.listening == null && lyrics.source != "whisper") TextButton(onClick = vm::listenForLyrics) { Text("Auto-sync") }
+                TextButton(onClick = vm::startLyricsSync) { Text(if (lyrics.synced) "Re-sync" else "Tap sync") }
                 TextButton(onClick = { editing = true }) { Text("Change") }
             } else {
                 TextButton(onClick = vm::stopLyricsSync) { Text("Stop") }
             }
         }
 
+        k.lyricsMessage?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         val list = rememberLazyListState()
         val focus = if (k.syncing) k.syncNext else current
         LaunchedEffect(focus) { if (focus >= 0) list.animateScrollToItem(maxOf(0, focus - 2)) }

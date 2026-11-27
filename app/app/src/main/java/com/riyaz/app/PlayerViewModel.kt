@@ -19,8 +19,13 @@ import com.riyaz.app.fit.KeyHabits
 import com.riyaz.app.fit.KeySuggestion
 import com.riyaz.app.fit.SongUnderstanding
 import com.riyaz.app.fit.Understanding
+import com.riyaz.app.analysis.Chord
+import com.riyaz.app.play.PlayAlongResult
+import com.riyaz.app.play.PlayAlongSession
 import com.riyaz.app.karaoke.VocalSeparator
 import com.riyaz.app.lyrics.Romanization
+import com.riyaz.app.lyrics.LyricsAligner
+import com.riyaz.app.lyrics.WhisperLyrics
 import com.riyaz.app.songbook.Sheet
 import com.riyaz.app.songbook.SongSheet
 import com.riyaz.app.voice.effectiveRange
@@ -88,6 +93,19 @@ data class PlayerState(
     val karaoke: KaraokeState = KaraokeState(),
     val fit: FitState? = null,
     val makingSheet: Boolean = false,      // building a chord sheet from the song (may fetch lyrics first)
+    val notice: String? = null,            // a one-off message ("Backed up …")
+    val playAlong: PlayAlongState = PlayAlongState(),
+)
+
+/** Strumming along with the song while the mic checks your chords (Phase 8). */
+data class PlayAlongState(
+    val on: Boolean = false,
+    val headphones: Boolean = false,
+    val expected: Chord? = null,       // the chord sounding now (in the key you hear)
+    val ok: Boolean? = null,           // what you're playing fits it (null: not playing / nothing to check)
+    val sounds: Chord? = null,         // the chord your playing sounds like
+    val result: PlayAlongResult? = null,
+    val error: String? = null,
 )
 
 /** Phase 6: what Riyaz understood about the song and the key it suggests for you ([needs] says what's missing). */
@@ -112,6 +130,7 @@ data class KaraokeState(
     val learn: Boolean = true,             // learn from this session (off when a friend sings)
     val lastSession: SessionResult? = null,
     val lastSessionSaved: Boolean = false,
+    val listening: Busy? = null,           // Whisper: downloading its model / listening to the singing
 )
 
 private const val TAG = "Riyaz"
@@ -145,6 +164,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private var prepareJob: Job? = null
     private var lyricsJob: Job? = null
     private val separator = VocalSeparator(app)
+    private val whisper = WhisperLyrics(app)
+    private var whisperJob: Job? = null
 
     private val focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
         .setAudioAttributes(
@@ -196,6 +217,20 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun closeTool() = _state.update { it.copy(tool = null) }
+
+    /** After a restore: re-read the voice profile, key habits and song settings from disk. */
+    fun reloadAfterRestore() {
+        val song = _state.value.song
+        val fresh = song?.let { s -> library.recent().firstOrNull { it.id == s.id } }
+        _state.update {
+            it.copy(voice = voiceStore.load(), learned = voiceStore.loadLearned(), habits = voiceStore.loadHabits(),
+                recent = library.recent(), song = fresh ?: it.song)
+        }
+        fresh?.let { applyToEngine(it) }
+    }
+
+    fun toast(msg: String) = _state.update { it.copy(error = null, notice = msg) }
+    fun dismissNotice() = _state.update { it.copy(notice = null) }
 
     fun saveVoiceProfile(p: VoiceProfile) {
         viewModelScope.launch(Dispatchers.IO) { voiceStore.save(p) }
@@ -329,6 +364,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     private suspend fun load(song: Song) {
         if (_state.value.karaoke.singing) stopSinging()
+        if (playJob?.isActive == true) { playJob?.cancel(); playJob = null }
         val ok = withContext(Dispatchers.IO) {
             NativeEngine.nativeLoad(library.pcmFile(song).absolutePath, song.sampleRate)
         }
@@ -341,7 +377,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         _positionMs.value = 0
         _state.update {
             it.copy(song = song, peaks = peaks, playing = false, error = null, showPlayer = true,
-                analysis = null, analyzing = null, analysisError = null, karaoke = KaraokeState())
+                analysis = null, analyzing = null, analysisError = null, karaoke = KaraokeState(), playAlong = PlayAlongState())
         }
         startAnalysis(song)
         attachBacking(song)
@@ -362,6 +398,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         NativeEngine.nativeSetVocalGain(if (ok) song.vocalLevel else 1f)
         updateKaraoke(song) { it.copy(backingReady = ok) }
         if (ok) ensureMelody(song)
+        else withContext(Dispatchers.IO) { Melody.load(library.dir(song)) }?.let { m -> updateKaraoke(song) { it.copy(melody = m) } }
     }
 
     // ------------------------------------------------------------------ singing (Phase 5)
@@ -393,6 +430,102 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ------------------------------------------------------------------ play-along (Phase 8)
+
+    private var playJob: Job? = null
+    /** Every reading of this take: window end on the song's timeline (before the delay), chroma, loudness. */
+    private val playReadings = ArrayList<Triple<Double, FloatArray, Float>>()
+
+    /** Replays [readings] at a given delay (song → ears → hands → mic) and scores them. */
+    private fun replay(segs: List<com.riyaz.app.analysis.ChordSegment>, keyShift: Int, readings: List<Triple<Double, FloatArray, Float>>,
+                       delaySec: Double, tempo: Float): PlayAlongSession {
+        val s = PlayAlongSession(segs, keyShift)
+        for ((t, c, rms) in readings) s.add(t - delaySec * tempo, c, rms)
+        return s
+    }
+
+    /** The delay (0-0.6 s) at which your playing fits the song best; Bluetooth adds a lot. */
+    private fun bestDelay(segs: List<com.riyaz.app.analysis.ChordSegment>, keyShift: Int,
+                          readings: List<Triple<Double, FloatArray, Float>>, tempo: Float): Double =
+        (0..12).map { it * 0.05 }.maxByOrNull { d ->
+            val r = replay(segs, keyShift, readings, d, tempo).result()
+            r.right - 0.001 * kotlin.math.abs(d - 0.2)    // ties: closest to a typical 0.2 s
+        } ?: 0.2
+
+    fun startPlayAlong() {
+        val s = _state.value
+        val song = s.song ?: return
+        val analysis = s.analysis ?: return
+        if (s.karaoke.singing || playJob?.isActive == true) return
+        playReadings.clear()
+        _state.update { it.copy(playAlong = PlayAlongState(on = true, headphones = headphonesConnected())) }
+        playJob = viewModelScope.launch {
+            if (!NativeEngine.nativeMicStart()) {
+                _state.update { it.copy(playAlong = PlayAlongState(error = "Couldn't open the microphone")) }
+                return@launch
+            }
+            val buf = FloatArray(13 * 64)
+            var keyShift = song.semitones
+            var delaySec = 0.2
+            var live = PlayAlongSession(analysis.segments, keyShift)
+            var lastFit = SystemClock.elapsedRealtime()
+            try {
+                while (isActive) {
+                    val n = NativeEngine.nativeMicPollChroma(buf)
+                    val cur = _state.value.song
+                    if (cur == null || cur.id != song.id) break
+                    if (cur.semitones != keyShift) { keyShift = cur.semitones; live = PlayAlongSession(analysis.segments, keyShift); playReadings.clear() }
+                    if (_state.value.playing) {
+                        val nowSong = NativeEngine.nativePosition().toDouble() / cur.sampleRate
+                        var last: Pair<Boolean, Chord>? = null
+                        for (j in 0 until n) {
+                            val t = nowSong - (n - 1 - j) * 0.1 * cur.tempo
+                            val chroma = buf.copyOfRange(13 * j, 13 * j + 12)
+                            val rms = buf[13 * j + 12]
+                            playReadings += Triple(t, chroma, rms)
+                            live.add(t - delaySec * cur.tempo, chroma, rms)?.let { last = it }
+                        }
+                        // every 10 s, re-measure the delay from the last 40 s of playing
+                        if (SystemClock.elapsedRealtime() - lastFit > 10_000 && playReadings.size > 100) {
+                            lastFit = SystemClock.elapsedRealtime()
+                            val recent = playReadings.takeLastWhile { it.first > nowSong - 40 * cur.tempo }
+                            delaySec = withContext(Dispatchers.Default) { bestDelay(analysis.segments, keyShift, recent, cur.tempo) }
+                        }
+                        val expected = live.expectedAt(nowSong - delaySec * cur.tempo)
+                        _state.update { st ->
+                            st.copy(playAlong = st.playAlong.copy(expected = expected,
+                                ok = last?.first ?: if (n > 0) null else st.playAlong.ok, sounds = last?.second ?: st.playAlong.sounds))
+                        }
+                    }
+                    delay(50)
+                }
+            } finally {
+                NativeEngine.nativeMicStop()
+            }
+        }
+    }
+
+    /** Mic off: scores the take, chord by chord, at the delay that fits it best. */
+    fun stopPlayAlong() {
+        val song = _state.value.song
+        val analysis = _state.value.analysis
+        playJob?.cancel()
+        playJob = null
+        val readings = ArrayList(playReadings)
+        _state.update { it.copy(playAlong = it.playAlong.copy(on = false, expected = null, ok = null, sounds = null)) }
+        if (song == null || analysis == null || readings.isEmpty()) return
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.Default) {
+                val d = bestDelay(analysis.segments, song.semitones, readings, song.tempo)
+                Log.i(TAG, "play-along: ${readings.size} readings, delay ${"%.2f".format(d)} s")
+                replay(analysis.segments, song.semitones, readings, d, song.tempo).result()
+            }
+            _state.update { it.copy(playAlong = it.playAlong.copy(result = result)) }
+        }
+    }
+
+    fun dismissPlayAlongResult() = _state.update { it.copy(playAlong = it.playAlong.copy(result = null)) }
+
     fun setLearnFromSession(on: Boolean) = _state.value.song?.let { s -> updateKaraoke(s) { it.copy(learn = on) } }
 
     private fun headphonesConnected(): Boolean {
@@ -409,6 +542,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     fun startSinging() {
         val song = _state.value.song ?: return
         if (singJob?.isActive == true) return
+        if (playJob?.isActive == true) stopPlayAlong()
         sessionFrames.clear()
         _liveSinging.value = emptyList()
         updateKaraoke(song) { it.copy(singing = true, headphones = headphonesConnected(), lastSession = null, lastSessionSaved = false) }
@@ -580,6 +714,72 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                 updateKaraoke(song) { it.copy(lyricsLoading = false, lyricsMessage = "Couldn't reach the lyrics service.") }
             }
         }
+    }
+
+    // ------------------------------------------------------------------ Whisper lyrics (Phase 8)
+
+    /** Size of the one-time download Whisper needs (0 once it's there). */
+    fun whisperDownloadBytes(): Long = whisper.downloadBytes
+
+    /**
+     * Listens to the singing with Whisper (the vocal track if the karaoke track exists). Lyrics without
+     * timings get timed from it; with no lyrics, what it heard becomes a draft. What it heard is kept, so
+     * doing this again is instant.
+     */
+    fun listenForLyrics() {
+        val song = _state.value.song ?: return
+        if (whisperJob?.isActive == true) return
+        whisperJob = viewModelScope.launch {
+            val dir = library.dir(song)
+            try {
+                var heard = withContext(Dispatchers.IO) { WhisperLyrics.load(dir) }
+                if (heard == null) {
+                    if (!whisper.ready) {
+                        updateKaraoke(song) { it.copy(listening = Busy("Downloading the lyrics model (once)", null, 0f), lyricsMessage = null) }
+                        withContext(Dispatchers.IO) {
+                            whisper.ensureModels({ p -> updateKaraoke(song) { it.copy(listening = it.listening?.copy(progress = p)) } }, { !isActive })
+                        }
+                    }
+                    updateKaraoke(song) { it.copy(listening = Busy("Listening to the singing…", null, 0f), lyricsMessage = null) }
+                    val poll = launch { while (isActive) { updateKaraoke(song) { it.copy(listening = it.listening?.copy(progress = WhisperLyrics.progress())) }; delay(300) } }
+                    val language = WhisperLyrics.code(_state.value.fit?.understanding?.language)
+                    heard = try {
+                        withContext(Dispatchers.Default) { whisper.hear(library.pcmFile(song), VocalSeparator.backingFile(dir), song.sampleRate, language) }
+                    } finally { poll.cancel() }
+                    if (heard.isNullOrEmpty()) {
+                        updateKaraoke(song) { it.copy(listening = null, lyricsMessage = if (heard == null) null else "Whisper didn't hear any words in this song.") }
+                        return@launch
+                    }
+                    withContext(Dispatchers.IO) { WhisperLyrics.save(dir, heard) }
+                }
+                val lyrics = _state.value.karaoke.lyrics
+                val r = Romanization.instance
+                val (result, message) = if (lyrics != null && lyrics.lines.isNotEmpty()) {
+                    val aligned = withContext(Dispatchers.Default) {
+                        LyricsAligner.align(lyrics.lines.map { r.romanize(it.text) }, heard.map { it.copy(text = r.romanize(it.text)) })
+                    }
+                    if (aligned == null) null to "The singing didn't match these lyrics closely enough to time them. You can tap along instead (Sync)."
+                    else lyrics.copy(lines = lyrics.lines.mapIndexed { i, l -> l.copy(time = aligned.times[i]) },
+                        source = lyrics.source.substringBefore("+") + "+whisper") to null
+                } else {
+                    Lyrics(heard.map { LyricLine(it.text, it.start) }, "whisper", song.title, song.artist ?: "") to null
+                }
+                if (result != null) withContext(Dispatchers.IO) { LyricsStore.save(dir, result) }
+                updateKaraoke(song) { it.copy(lyrics = result ?: it.lyrics, listening = null, lyricsMessage = message) }
+            } catch (e: CancellationException) {
+                updateKaraoke(song) { it.copy(listening = null) }
+                throw e
+            } catch (e: Throwable) {
+                Log.e(TAG, "whisper failed", e)
+                updateKaraoke(song) { it.copy(listening = null, lyricsMessage = "Couldn't listen to this song: ${e.message}") }
+            }
+        }
+    }
+
+    fun cancelListening() {
+        WhisperLyrics.cancel()
+        whisperJob?.cancel()
+        _state.value.song?.let { s -> updateKaraoke(s) { it.copy(listening = null) } }
     }
 
     /** Tap-along sync for lyrics without timings (covers, live versions, indie songs). */
