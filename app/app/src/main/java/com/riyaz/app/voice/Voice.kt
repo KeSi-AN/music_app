@@ -94,8 +94,26 @@ class VoiceStore(dir: File) {
         val old = runCatching { JSONObject(file.readText()) }.getOrNull()
         val history = old?.optJSONArray("history") ?: JSONArray()
         history.put(p.toJson())
-        file.writeText(JSONObject().put("current", p.toJson()).put("history", history).toString(2))
+        val out = (old ?: JSONObject()).put("current", p.toJson()).put("history", history)
+        file.writeText(out.toString(2))
     }
+
+    fun loadLearned(): LearnedVoice = LearnedVoice.fromJson(runCatching { JSONObject(file.readText()).optJSONObject("learned") }.getOrNull())
+
+    fun saveLearned(l: LearnedVoice) {
+        val old = runCatching { JSONObject(file.readText()) }.getOrNull() ?: JSONObject()
+        file.writeText(old.put("learned", l.toJson()).toString(2))
+    }
+}
+
+/**
+ * Your working range: what you've actually sung comfortably in karaoke where there's enough evidence,
+ * otherwise what the range test measured.
+ */
+fun effectiveRange(test: VoiceProfile?, learned: LearnedVoice): Pair<Float, Float>? {
+    val low = learned.learnedLow()?.toFloat() ?: test?.comfortableLow
+    val high = learned.learnedHigh()?.toFloat() ?: test?.comfortableHigh
+    return if (low != null && high != null && high > low) low to high else null
 }
 
 /** Turns the three recorded steps of the range test into a [VoiceProfile]. */

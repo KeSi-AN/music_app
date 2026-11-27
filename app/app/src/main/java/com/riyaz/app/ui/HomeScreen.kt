@@ -153,7 +153,7 @@ fun HomeScreen(vm: PlayerViewModel) {
             }
 
             if (search.searchedFor == null && !search.searching) {
-                item { ToolsRow(s.voice, onTuner = { vm.openTool(Tool.TUNER) }, onVoice = { vm.openTool(Tool.VOICE_TEST) }) }
+                item { ToolsRow(s.voice, s.learned, onTuner = { vm.openTool(Tool.TUNER) }, onVoice = { vm.openTool(Tool.VOICE_TEST) }) }
             }
 
             if (search.searchedFor != null && !search.searching) {
@@ -182,7 +182,7 @@ fun HomeScreen(vm: PlayerViewModel) {
 }
 
 @Composable
-private fun ToolsRow(voice: VoiceProfile?, onTuner: () -> Unit, onVoice: () -> Unit) {
+private fun ToolsRow(voice: VoiceProfile?, learned: com.riyaz.app.voice.LearnedVoice, onTuner: () -> Unit, onVoice: () -> Unit) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Card(onClick = onTuner, modifier = Modifier.weight(1f)) {
             Column(Modifier.padding(14.dp)) {
@@ -198,7 +198,7 @@ private fun ToolsRow(voice: VoiceProfile?, onTuner: () -> Unit, onVoice: () -> U
                 Spacer(Modifier.height(6.dp))
                 Text("My voice", style = MaterialTheme.typography.titleSmall)
                 Text(
-                    voice?.let { "${Notes.name(it.comfortableLow)} – ${Notes.name(it.comfortableHigh)}" } ?: "Find your range",
+                    com.riyaz.app.voice.effectiveRange(voice, learned)?.let { (lo, hi) -> "${Notes.name(lo)} – ${Notes.name(hi)}" + if (learned.sessions > 0) " · ${learned.sessions} songs" else "" } ?: "Find your range",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }

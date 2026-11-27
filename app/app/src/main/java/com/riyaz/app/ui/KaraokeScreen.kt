@@ -93,6 +93,7 @@ fun KaraokeScreen(vm: PlayerViewModel) {
         Column(Modifier.padding(pad).fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             VocalsCard(vm, song, k)
             KeyAndChordRow(vm, song, s)
+            if (k.backingReady) SingPanel(vm, song, k)
             LyricsPanel(vm, k, Modifier.weight(1f))
         }
     }

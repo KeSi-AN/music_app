@@ -16,6 +16,14 @@ import com.riyaz.app.analysis.SongAnalyzer
 import com.riyaz.app.audio.NativeEngine
 import com.riyaz.app.karaoke.VocalSeparator
 import com.riyaz.app.voice.VoiceProfile
+import com.riyaz.app.voice.LearnedVoice
+import com.riyaz.app.voice.Melody
+import com.riyaz.app.voice.PitchTracker
+import com.riyaz.app.voice.SessionAnalysis
+import com.riyaz.app.voice.SessionResult
+import com.riyaz.app.voice.SongPreference
+import com.riyaz.app.voice.SungFrame
+import kotlin.math.roundToInt
 import com.riyaz.app.voice.VoiceStore
 import com.riyaz.app.lyrics.LyricLine
 import com.riyaz.app.lyrics.Lyrics
@@ -63,7 +71,8 @@ data class PlayerState(
     val analysisError: String? = null,
     val showKaraoke: Boolean = false,
     val tool: Tool? = null,
-    val voice: VoiceProfile? = null,
+    val voice: VoiceProfile? = null,       // from the range test
+    val learned: LearnedVoice = LearnedVoice(),
     val karaoke: KaraokeState = KaraokeState(),
 )
 
@@ -79,6 +88,13 @@ data class KaraokeState(
     val lyricsQuery: String = "",
     val syncing: Boolean = false,          // tap-along mode for unsynced lyrics
     val syncNext: Int = 0,                 // next line to stamp
+    val melody: Melody? = null,            // the song's sung melody (needs the karaoke track)
+    val melodyProgress: Float? = null,
+    val singing: Boolean = false,          // mic on, following your voice
+    val headphones: Boolean = false,
+    val learn: Boolean = true,             // learn from this session (off when a friend sings)
+    val lastSession: SessionResult? = null,
+    val lastSessionSaved: Boolean = false,
 )
 
 private const val TAG = "Riyaz"
@@ -88,7 +104,17 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private val audioManager = app.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
     private val voiceStore = VoiceStore(app.filesDir)
-    private val _state = MutableStateFlow(PlayerState(recent = library.recent(), voice = voiceStore.load()))
+    private val _state = MutableStateFlow(PlayerState(recent = library.recent(), voice = voiceStore.load(), learned = voiceStore.loadLearned()))
+
+    // Your pitch on the song's timeline while singing; kept apart from [state] (it updates 30x a second).
+    private val _liveSinging = MutableStateFlow<List<SungFrame>>(emptyList())
+    val liveSinging: StateFlow<List<SungFrame>> = _liveSinging
+    /** Measured delay (s) between the song and the mic while singing; the live view shifts your line by it. */
+    private val _liveDelay = MutableStateFlow(0.2)
+    val liveDelay: StateFlow<Double> = _liveDelay
+    private var singJob: Job? = null
+    private var melodyJob: Job? = null
+    private val sessionFrames = ArrayList<SungFrame>()
     val state: StateFlow<PlayerState> = _state
 
     // Kept separate from [state] so the 20-per-second playhead updates only redraw the playhead.
@@ -278,6 +304,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private suspend fun load(song: Song) {
+        if (_state.value.karaoke.singing) stopSinging()
         val ok = withContext(Dispatchers.IO) {
             NativeEngine.nativeLoad(library.pcmFile(song).absolutePath, song.sampleRate)
         }
@@ -310,7 +337,141 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         val ok = f.exists() && withContext(Dispatchers.IO) { NativeEngine.nativeLoadBacking(f.absolutePath) }
         NativeEngine.nativeSetVocalGain(if (ok) song.vocalLevel else 1f)
         updateKaraoke(song) { it.copy(backingReady = ok) }
+        if (ok) ensureMelody(song)
     }
+
+    // ------------------------------------------------------------------ singing (Phase 5)
+
+    /** Pitch-tracks the singer in the song (original - instrumental) once, and keeps it. */
+    private fun ensureMelody(song: Song) {
+        if (melodyJob?.isActive == true) return
+        melodyJob = viewModelScope.launch {
+            val dir = library.dir(song)
+            val saved = withContext(Dispatchers.IO) { Melody.load(dir) }
+            if (saved != null) { updateKaraoke(song) { it.copy(melody = saved) }; return@launch }
+            updateKaraoke(song) { it.copy(melodyProgress = 0f) }
+            val poll = launch { while (isActive) { updateKaraoke(song) { it.copy(melodyProgress = NativeEngine.nativeMelodyProgress()) }; delay(200) } }
+            try {
+                val t0 = SystemClock.elapsedRealtime()
+                val midi = withContext(Dispatchers.Default) {
+                    NativeEngine.nativeComputeMelody(library.pcmFile(song).absolutePath,
+                        VocalSeparator.backingFile(dir).absolutePath, song.sampleRate)
+                }
+                poll.cancel()
+                if (midi == null) { updateKaraoke(song) { it.copy(melodyProgress = null) }; return@launch }
+                val m = Melody(midi)
+                withContext(Dispatchers.IO) { Melody.save(dir, m) }
+                Log.i(TAG, "melody for ${song.id}: ${midi.size} frames in ${SystemClock.elapsedRealtime() - t0} ms, range ${m.range()}")
+                updateKaraoke(song) { it.copy(melody = m, melodyProgress = null) }
+            } finally {
+                poll.cancel()
+            }
+        }
+    }
+
+    fun setLearnFromSession(on: Boolean) = _state.value.song?.let { s -> updateKaraoke(s) { it.copy(learn = on) } }
+
+    private fun headphonesConnected(): Boolean {
+        val outs = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+        val phones = setOf(
+            android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES, android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET,
+            android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, android.media.AudioDeviceInfo.TYPE_USB_HEADSET,
+            android.media.AudioDeviceInfo.TYPE_BLE_HEADSET,
+        )
+        return outs.any { it.type in phones }
+    }
+
+    /** Mic on: follows your voice on the song's timeline until [stopSinging]. Needs RECORD_AUDIO. */
+    fun startSinging() {
+        val song = _state.value.song ?: return
+        if (singJob?.isActive == true) return
+        sessionFrames.clear()
+        _liveSinging.value = emptyList()
+        updateKaraoke(song) { it.copy(singing = true, headphones = headphonesConnected(), lastSession = null, lastSessionSaved = false) }
+        val tracker = PitchTracker()
+        singJob = viewModelScope.launch {
+            if (!tracker.start()) {
+                updateKaraoke(song) { it.copy(singing = false, error = "Couldn't open the microphone") }
+                return@launch
+            }
+            val t0 = SystemClock.elapsedRealtime()
+            try {
+                var polled = 0; var voiced = 0; var lastLog = 0L; var lastDelayCheck = 0L
+                while (isActive) {
+                    val frames = tracker.poll()
+                    polled += frames.size; voiced += frames.count { it.voiced }
+                    if (SystemClock.elapsedRealtime() - lastLog > 3000) {
+                        Log.d(TAG, "singing: $polled readings, $voiced voiced, playing=${_state.value.playing}, kept ${sessionFrames.size}")
+                        lastLog = SystemClock.elapsedRealtime()
+                    }
+                    if (_state.value.playing && frames.isNotEmpty()) {
+                        // place each reading on the song's timeline: the song position now, minus its age
+                        val nowSong = NativeEngine.nativePosition().toDouble() / song.sampleRate
+                        val nowMs = SystemClock.elapsedRealtime() - t0
+                        for (f in frames) {
+                            val m = f.midi() ?: continue
+                            sessionFrames += SungFrame(nowSong - (nowMs - f.tMs) / 1000.0, m)
+                        }
+                        val cutoff = nowSong - 8.0
+                        _liveSinging.value = sessionFrames.takeLastWhile { it.songSec > cutoff }
+                        // re-measure the delay every ~3 s from the last 15 s of singing
+                        val mel = _state.value.karaoke.melody
+                        if (mel != null && sessionFrames.size > 150 && SystemClock.elapsedRealtime() - lastDelayCheck > 3000) {
+                            lastDelayCheck = SystemClock.elapsedRealtime()
+                            val recent = sessionFrames.takeLastWhile { it.songSec > nowSong - 15.0 }
+                            val key = song.semitones + song.cents / 100f
+                            _liveDelay.value = withContext(Dispatchers.Default) {
+                                SessionAnalysis.estimateDelay(mel, recent, key, SessionAnalysis.estimateOctave(mel, recent, key))
+                            }
+                        }
+                    }
+                    delay(33)
+                }
+            } finally {
+                tracker.stop()
+            }
+        }
+    }
+
+    /** Mic off: compares your singing with the melody and (if learning is on) updates your voice profile. */
+    fun stopSinging() {
+        val song = _state.value.song ?: return
+        singJob?.cancel()
+        singJob = null
+        val k = _state.value.karaoke
+        val melody = k.melody
+        val frames = ArrayList(sessionFrames)
+        updateKaraoke(song) { it.copy(singing = false) }
+        if (melody == null || frames.isEmpty()) return
+        viewModelScope.launch {
+            val key = song.semitones + song.cents / 100f
+            val result = withContext(Dispatchers.Default) { SessionAnalysis.analyse(melody, frames, key) }
+            // keep the raw readings of the last session (local only) so the analysis can be checked
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    java.io.File(library.dir(song), "last_session.csv").printWriter().use { w ->
+                        w.println("songSec,midi,key=$key")
+                        frames.forEach { w.println("%.3f,%.3f".format(it.songSec, it.midi)) }
+                    }
+                }
+            }
+            Log.i(TAG, "sing session: ${frames.size} frames, ${result.sungNotes.size}/${result.notes.size} notes, " +
+                "accuracy ${(result.accuracy * 100).roundToInt()}%, octave ${result.octave}, delay ${"%.2f".format(result.delaySec)} s")
+            val save = k.learn && result.enough
+            if (save) {
+                val range = melody.range()
+                val shift = key + 12 * result.octave
+                val pref = SongPreference(song.id, song.title, key, result.octave,
+                    range?.first?.plus(shift), range?.second?.plus(shift), result.accuracy, System.currentTimeMillis())
+                val learned = _state.value.learned.plus(result, pref)
+                withContext(Dispatchers.IO) { voiceStore.saveLearned(learned) }
+                _state.update { it.copy(learned = learned) }
+            }
+            updateKaraoke(song) { it.copy(lastSession = result, lastSessionSaved = save) }
+        }
+    }
+
+    fun dismissSessionResult() = _state.value.song?.let { s -> updateKaraoke(s) { it.copy(lastSession = null) } }
 
     fun openKaraoke() {
         val song = _state.value.song ?: return
@@ -322,7 +483,10 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun closeKaraoke() = _state.update { it.copy(showKaraoke = false) }
+    fun closeKaraoke() {
+        if (_state.value.karaoke.singing) stopSinging()
+        _state.update { it.copy(showKaraoke = false) }
+    }
 
     /** Makes the instrumental (downloads the model the first time). Runs in the background. */
     fun prepareKaraoke() {

@@ -7,6 +7,7 @@
 #include "analysis.h"
 #include "separation.h"
 #include "mic_input.h"
+#include "melody.h"
 #include "audio_engine.h"
 
 // One engine for the whole app; NativeEngine.kt is a Kotlin object wrapping these calls.
@@ -122,5 +123,21 @@ JNIEXPORT jint JNICALL FN(nativeMicPoll)(JNIEnv *env, jobject, jfloatArray out) 
     env->ReleaseFloatArrayElements(out, p, 0);
     return n;
 }
+
+// ---- song melody from the vocal track (original - instrumental)
+
+static std::atomic<float> gMelodyProgress{0.0f};
+
+// Returns fractional MIDI pitch every 20 ms (NaN = nobody singing), or null.
+JNIEXPORT jfloatArray JNICALL FN(nativeComputeMelody)(JNIEnv *env, jobject, jstring orig, jstring backing, jint sampleRate) {
+    auto str = [&](jstring s) { const char *c = env->GetStringUTFChars(s, nullptr); std::string r(c); env->ReleaseStringUTFChars(s, c); return r; };
+    gMelodyProgress = 0.0f;
+    riyaz::Melody m;
+    if (!riyaz::computeMelody(str(orig), str(backing), sampleRate, m, &gMelodyProgress)) return nullptr;
+    jfloatArray arr = env->NewFloatArray(jsize(m.midi.size()));
+    if (arr) env->SetFloatArrayRegion(arr, 0, jsize(m.midi.size()), m.midi.data());
+    return arr;
+}
+JNIEXPORT jfloat JNICALL FN(nativeMelodyProgress)(JNIEnv *, jobject) { return gMelodyProgress.load(); }
 
 }  // extern "C"

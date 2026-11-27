@@ -12,6 +12,7 @@ add_library(riyaz SHARED
     separation.cpp
     pitch.cpp
     mic_input.cpp
+    melody.cpp
 )
 
 target_include_directories(riyaz PRIVATE

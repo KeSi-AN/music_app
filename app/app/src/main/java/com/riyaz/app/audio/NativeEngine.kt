@@ -45,6 +45,10 @@ object NativeEngine {
     /** Fills [out] with [hz, clarity, rms] triples since the last call; returns how many (hz = 0: no pitch). */
     external fun nativeMicPoll(out: FloatArray): Int
 
+    /** Sung melody: fractional MIDI every 20 ms (NaN = no voice), from original - instrumental. Slow. */
+    external fun nativeComputeMelody(originalPcm: String, backingPcm: String, sampleRate: Int): FloatArray?
+    external fun nativeMelodyProgress(): Float
+
     /** Test harness only: offline render of part of a song with the live key/speed settings. */
     external fun nativeRenderTest(
         pcmPath: String, sampleRate: Int, startFrame: Long, outFrames: Int,

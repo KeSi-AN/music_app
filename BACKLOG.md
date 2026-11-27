@@ -2,6 +2,20 @@
 
 These are outside the phase plan (`BUILD_PLAN.md`). Newest first within each section.
 
+## To test (reminder)
+
+### Sing and test Phase 5
+- **Who:** you, as asked on 2026-11-27.
+- **How:**
+  1. Plug in headphones and open a song that has a karaoke track (Uska Hi Bana or Vellake). Then tap Karaoke, then **Sing**.
+  2. Sing a verse or two with the vocals slider on "Karaoke", then tap **Done singing**.
+- **What to check:**
+  - Your line follows the melody bars without lagging.
+  - The score makes sense.
+  - "My voice" on the home screen shows "· 1 songs" afterwards.
+- **Without headphones:** the mic also hears the speaker, and at low volume it hears nothing.
+- **Also check:** a friend singing with "Learn from it" switched off doesn't change your profile.
+
 ## Fixes
 
 ### Slow first load of a new song
