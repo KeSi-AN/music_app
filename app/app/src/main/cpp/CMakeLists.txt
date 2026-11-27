@@ -10,6 +10,8 @@ add_library(riyaz SHARED
     analysis.cpp
     dsp.cpp
     separation.cpp
+    pitch.cpp
+    mic_input.cpp
 )
 
 target_include_directories(riyaz PRIVATE

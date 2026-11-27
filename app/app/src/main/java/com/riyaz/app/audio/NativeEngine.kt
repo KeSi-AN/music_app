@@ -39,6 +39,12 @@ object NativeEngine {
     external fun nativeMdxWriteBacking(handle: Long, outPath: String, compensate: Float): Boolean
     external fun nativeMdxClose(handle: Long)
 
+    /** Microphone pitch tracking (YIN, 16 kHz, 62.5 results per second). Needs RECORD_AUDIO. */
+    external fun nativeMicStart(): Boolean
+    external fun nativeMicStop()
+    /** Fills [out] with [hz, clarity, rms] triples since the last call; returns how many (hz = 0: no pitch). */
+    external fun nativeMicPoll(out: FloatArray): Int
+
     /** Test harness only: offline render of part of a song with the live key/speed settings. */
     external fun nativeRenderTest(
         pcmPath: String, sampleRate: Int, startFrame: Long, outFrames: Int,

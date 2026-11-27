@@ -62,6 +62,11 @@ import com.riyaz.app.PlayerViewModel
 import com.riyaz.app.audio.Song
 import com.riyaz.app.youtube.YouTube
 import com.riyaz.app.youtube.YtResult
+import com.riyaz.app.Tool
+import com.riyaz.app.voice.Notes
+import com.riyaz.app.voice.VoiceProfile
+import androidx.compose.material.icons.filled.RecordVoiceOver
+import androidx.compose.material.icons.filled.Tune
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -147,6 +152,10 @@ fun HomeScreen(vm: PlayerViewModel) {
                 }
             }
 
+            if (search.searchedFor == null && !search.searching) {
+                item { ToolsRow(s.voice, onTuner = { vm.openTool(Tool.TUNER) }, onVoice = { vm.openTool(Tool.VOICE_TEST) }) }
+            }
+
             if (search.searchedFor != null && !search.searching) {
                 item { SectionTitle("Results for “${search.searchedFor}”") }
                 if (search.results.isEmpty()) {
@@ -168,6 +177,31 @@ fun HomeScreen(vm: PlayerViewModel) {
                 }
             }
             item { Spacer(Modifier.height(16.dp)) }
+        }
+    }
+}
+
+@Composable
+private fun ToolsRow(voice: VoiceProfile?, onTuner: () -> Unit, onVoice: () -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Card(onClick = onTuner, modifier = Modifier.weight(1f)) {
+            Column(Modifier.padding(14.dp)) {
+                Icon(Icons.Default.Tune, null, tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.height(6.dp))
+                Text("Tuner", style = MaterialTheme.typography.titleSmall)
+                Text("Guitar or any note", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        Card(onClick = onVoice, modifier = Modifier.weight(1f)) {
+            Column(Modifier.padding(14.dp)) {
+                Icon(Icons.Default.RecordVoiceOver, null, tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.height(6.dp))
+                Text("My voice", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    voice?.let { "${Notes.name(it.comfortableLow)} – ${Notes.name(it.comfortableHigh)}" } ?: "Find your range",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }

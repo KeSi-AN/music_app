@@ -3,6 +3,8 @@
 
     <!-- YouTube search and download -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Tuner and voice range test (nothing is recorded or sent) -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <application
         android:allowBackup="false"

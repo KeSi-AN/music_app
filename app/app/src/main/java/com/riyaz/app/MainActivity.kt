@@ -21,6 +21,8 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.riyaz.app.ui.HomeScreen
 import com.riyaz.app.ui.KaraokeScreen
+import com.riyaz.app.ui.TunerScreen
+import com.riyaz.app.ui.VoiceTestScreen
 import com.riyaz.app.ui.PlayerScreen
 import com.riyaz.app.ui.RiyazTheme
 import kotlinx.coroutines.launch
@@ -59,6 +61,8 @@ class MainActivity : ComponentActivity() {
             RiyazTheme {
                 val s by vm.state.collectAsState()
                 when {
+                    s.tool == Tool.TUNER -> TunerScreen(onBack = vm::closeTool)
+                    s.tool == Tool.VOICE_TEST -> VoiceTestScreen(s.voice, onSave = vm::saveVoiceProfile, onBack = vm::closeTool)
                     s.showKaraoke && s.song != null -> KaraokeScreen(vm)
                     s.showPlayer && s.song != null -> PlayerScreen(vm)
                     else -> HomeScreen(vm)

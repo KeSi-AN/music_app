@@ -6,6 +6,7 @@
 
 #include "analysis.h"
 #include "separation.h"
+#include "mic_input.h"
 #include "audio_engine.h"
 
 // One engine for the whole app; NativeEngine.kt is a Kotlin object wrapping these calls.
@@ -105,6 +106,21 @@ JNIEXPORT jboolean JNICALL FN(nativeMdxWriteBacking)(JNIEnv *env, jobject, jlong
 }
 JNIEXPORT void JNICALL FN(nativeMdxClose)(JNIEnv *, jobject, jlong h) {
     delete reinterpret_cast<riyaz::MdxJob *>(h);
+}
+
+// ---- microphone pitch (tuner, voice range test)
+
+static riyaz::MicInput gMic;
+
+JNIEXPORT jboolean JNICALL FN(nativeMicStart)(JNIEnv *, jobject) { return gMic.start() ? JNI_TRUE : JNI_FALSE; }
+JNIEXPORT void JNICALL FN(nativeMicStop)(JNIEnv *, jobject) { gMic.stop(); }
+// Fills out with [hz, clarity, rms] triples produced since the last call; returns how many.
+JNIEXPORT jint JNICALL FN(nativeMicPoll)(JNIEnv *env, jobject, jfloatArray out) {
+    jsize len = env->GetArrayLength(out);
+    jfloat *p = env->GetFloatArrayElements(out, nullptr);
+    int n = gMic.poll(p, len / 3);
+    env->ReleaseFloatArrayElements(out, p, 0);
+    return n;
 }
 
 }  // extern "C"

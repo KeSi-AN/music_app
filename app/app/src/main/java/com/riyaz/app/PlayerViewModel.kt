@@ -15,6 +15,8 @@ import com.riyaz.app.analysis.SongAnalysis
 import com.riyaz.app.analysis.SongAnalyzer
 import com.riyaz.app.audio.NativeEngine
 import com.riyaz.app.karaoke.VocalSeparator
+import com.riyaz.app.voice.VoiceProfile
+import com.riyaz.app.voice.VoiceStore
 import com.riyaz.app.lyrics.LyricLine
 import com.riyaz.app.lyrics.Lyrics
 import com.riyaz.app.lyrics.LyricsService
@@ -60,8 +62,12 @@ data class PlayerState(
     val analyzing: Float? = null,          // progress while chords are being worked out
     val analysisError: String? = null,
     val showKaraoke: Boolean = false,
+    val tool: Tool? = null,
+    val voice: VoiceProfile? = null,
     val karaoke: KaraokeState = KaraokeState(),
 )
+
+enum class Tool { TUNER, VOICE_TEST }
 
 data class KaraokeState(
     val backingReady: Boolean = false,
@@ -81,7 +87,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private val library = SongLibrary(app)
     private val audioManager = app.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
-    private val _state = MutableStateFlow(PlayerState(recent = library.recent()))
+    private val voiceStore = VoiceStore(app.filesDir)
+    private val _state = MutableStateFlow(PlayerState(recent = library.recent(), voice = voiceStore.load()))
     val state: StateFlow<PlayerState> = _state
 
     // Kept separate from [state] so the 20-per-second playhead updates only redraw the playhead.
@@ -131,6 +138,19 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ------------------------------------------------------------------ navigation
+
+    /** Tuner / voice test: the microphone would hear the speaker, so playback pauses. */
+    fun openTool(t: Tool) {
+        pause()
+        _state.update { it.copy(tool = t) }
+    }
+
+    fun closeTool() = _state.update { it.copy(tool = null) }
+
+    fun saveVoiceProfile(p: VoiceProfile) {
+        viewModelScope.launch(Dispatchers.IO) { voiceStore.save(p) }
+        _state.update { it.copy(voice = p) }
+    }
 
     fun showPlayer() = _state.update { if (it.song != null) it.copy(showPlayer = true) else it }
     fun showHome() = _state.update { it.copy(showPlayer = false) }
