@@ -89,7 +89,8 @@ dependencies {
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.31.0")
 
     testImplementation("junit:junit:4.13.2")
-    testImplementation("org.json:json:20250517")   // android.jar's org.json is a stub in unit tests
+    testImplementation("org.json:json:20250517")
+    testImplementation("com.ibm.icu:icu4j:77.1")   // same transliterator as android.icu, for tests   // android.jar's org.json is a stub in unit tests
 
     // Thumbnails
     implementation("io.coil-kt.coil3:coil-compose:3.6.3")

@@ -21,8 +21,12 @@ These are outside the phase plan (`BUILD_PLAN.md`). Newest first within each sec
 
 ## Improvements
 
-### Lyrics in Roman script
-LRCLIB gives Hindi lyrics in Devanagari and Telugu lyrics in Telugu script. Many people sing from Romanised lyrics ("Uska hi bana"), so add a switch that transliterates them on the phone.
+### Chords over the lyrics in karaoke (Ultimate Guitar style)
+- **Want:** a toggle on the karaoke screen that shows each chord above the word where it changes, like a chord sheet. It follows your key, capo and Simple settings, and the current line stays highlighted.
+- **How:** the chord timeline (Phase 2) and the line timings (synced or tapped) already exist.
+  - Start by placing each chord change along its line in proportion to its time.
+  - For exact word positions, align words to the audio. Whisper with word timestamps would do it; so would the user tapping words.
+- **Needs:** timed lyrics. For untimed lyrics, show the line's chords as a row of names above it.
 
 ### Faster or better vocal removal
 - **Now:** MDX 9482 on the phone's CPU. On the Edge 50 Neo that took 2 min for Vellake (3:37) and 3 min for Uska Hi Bana (4:33), with a peak of about 1.1 GB of memory.

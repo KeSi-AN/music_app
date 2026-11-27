@@ -62,6 +62,7 @@ import androidx.compose.ui.unit.sp
 import com.riyaz.app.KaraokeState
 import com.riyaz.app.PlayerViewModel
 import com.riyaz.app.audio.Song
+import com.riyaz.app.lyrics.Romanization
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -204,6 +205,8 @@ private fun LyricsPanel(vm: PlayerViewModel, k: KaraokeState, modifier: Modifier
             return@Column
         }
 
+        // every language is shown in English letters (sound for sound, not translated)
+        val shown = remember(lyrics) { lyrics.lines.map { Romanization.instance.romanize(it.text) } }
         val sec = positionMs / 1000.0
         val current = if (lyrics.synced || lyrics.lines.any { it.time != null }) lyrics.lineAt(sec) else -1
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -229,10 +232,11 @@ private fun LyricsPanel(vm: PlayerViewModel, k: KaraokeState, modifier: Modifier
         Box(Modifier.weight(1f)) {
             LazyColumn(state = list, contentPadding = PaddingValues(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 itemsIndexed(lyrics.lines) { i, line ->
+                    val text = shown[i]
                     val isNow = if (k.syncing) i == k.syncNext else i == current
                     val past = if (k.syncing) i < k.syncNext else (current >= 0 && i < current)
                     Text(
-                        line.text,
+                        text,
                         fontSize = if (isNow) 26.sp else 20.sp,
                         fontWeight = if (isNow) FontWeight.Bold else FontWeight.Normal,
                         color = when {
@@ -250,7 +254,7 @@ private fun LyricsPanel(vm: PlayerViewModel, k: KaraokeState, modifier: Modifier
         if (k.syncing) {
             Button(onClick = vm::tapLyricLine, modifier = Modifier.fillMaxWidth().height(64.dp)) {
                 Text(
-                    lyrics.lines.getOrNull(k.syncNext)?.text?.let { "Now: $it" } ?: "Done",
+                    shown.getOrNull(k.syncNext)?.let { "Now: $it" } ?: "Done",
                     maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
                 )
             }
