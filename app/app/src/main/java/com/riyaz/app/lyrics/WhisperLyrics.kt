@@ -27,8 +27,7 @@ class WhisperLyrics(context: Context) {
     }
 
     /** What was sung, with times (text as Whisper wrote it). Null on failure or cancel. */
-    fun hear(originalPcm: File, backingPcm: File?, sampleRate: Int, language: String?): List<TimedText>? {
-        val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 6)
+    fun hear(originalPcm: File, backingPcm: File?, sampleRate: Int, language: String?, threads: Int = DEFAULT_THREADS): List<TimedText>? {
         val t0 = System.currentTimeMillis()
         val out = NativeEngine.nativeTranscribe(MODEL.file(dir).absolutePath, VAD.file(dir).absolutePath, originalPcm.absolutePath,
             backingPcm?.takeIf { it.exists() }?.absolutePath, sampleRate, language, threads) ?: return null
@@ -41,6 +40,12 @@ class WhisperLyrics(context: Context) {
     }
 
     companion object {
+        /** Tested on the phone 2026-11-28: Telugu (Vellake) came out as English-sounding nonsense. Others untested but
+         *  similarly scarce in Whisper's training. Hindi and English work. */
+        val WEAK_LANGUAGES = setOf("Telugu", "Bengali", "Tamil", "Kannada", "Malayalam")
+
+        /** Big cores only: with the slow cores included, every step waits for the slowest thread. */
+        val DEFAULT_THREADS = 4
         val MODEL = ModelFile("ggml-small-q5_1.bin", "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin",
             190_085_487L, "ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb")
         val VAD = ModelFile("ggml-silero-v5.1.2.bin", "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin",

@@ -34,6 +34,12 @@ These are outside the phase plan (`BUILD_PLAN.md`). Newest first within each sec
   3. Make a setlist and step through it.
 - **Checked on the phone on 2026-11-27** with Vellake, Uska Hi Bana and a pasted Ultimate Guitar-style sheet. All test sheets and the test setlist were then removed.
 
+### Try Phase 8 (play-along, lyrics from the singing, backup)
+- **Play along:** open a song, put on headphones, tap Start under "Play along" and strum. Check the green/red box follows you and the score at the end feels fair.
+  - Not yet checked with a real guitar. Through the phone speaker (no bass, vocals included) it scored only 19%, so that test proves the plumbing, not the accuracy. Simulated guitar on the laptop: 100% of right chords, 0% of wrong ones.
+- **Auto-sync / write out lyrics:** in Karaoke, lyrics without timings show "Auto-sync"; with no lyrics found there's "write them out from the singing". The first use downloads a 191 MB model, which stays in the app's storage.
+- **Backup:** ⋮ on the home screen → Back up to a file / Restore from a backup. Tested on 2026-11-28: backup (71 KB, 12 songs and 1 sheet) and restore both worked.
+
 ## Fixes
 
 ### Slow first load of a new song
@@ -52,6 +58,20 @@ These are outside the phase plan (`BUILD_PLAN.md`). Newest first within each sec
 - **Done when:** a new 4–5 min song is playable within about 2 s, and fully prepared within about 5 s.
 
 ## Improvements
+
+### Lyrics from the singing: what Phase 8 can't do yet
+- **Measured on the phone (2026-11-28):**
+  - WHITE KEYS: 20 s for the song; median line error 0.45 s, 84% of lines within 2 s.
+  - Uska Hi Bana (Hindi): 64 s; clean lines.
+- **Telugu doesn't work:** Whisper small wrote English-sounding nonsense for Vellake. Auto-sync refuses it safely, and drafts are blocked for Telugu, Bengali, Tamil, Kannada and Malayalam.
+  - large-v3-turbo (547 MB) is better at these languages, but the download is big and it's slower.
+- **Covers that change the order:** auto-sync assumes the lyrics are sung in their written order. The Uska Hi Bana cover sings an extra verse first and the verses in another order, so it refuses (rather than showing wrong times).
+  - Better: rebuild the lyrics "as sung": match each heard phrase to its best lyric line (repeats and reordering allowed), and keep unmatched phrases as Whisper's draft.
+- **Mumbled vocals** (Joji): too little is understood to sync.
+
+### Play-along: what's left
+- A real-guitar test with headphones. Then perhaps a chord-recognition mode without a song ("what am I playing?").
+
 
 ### Auto-fit: what Phase 6 doesn't do yet
 - **Song type (genre/mood):** the plan said YAMNet. For now it only shows the pace (slow / mid-tempo / upbeat) from the BPM.

@@ -729,6 +729,13 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     fun listenForLyrics() {
         val song = _state.value.song ?: return
         if (whisperJob?.isActive == true) return
+        // Whisper small writes nonsense for some languages (tested: Telugu); syncing is still safe because
+        // the aligner refuses a poor match, but a draft written from scratch would just be wrong
+        val lang = _state.value.fit?.understanding?.language
+        if (_state.value.karaoke.lyrics == null && lang in WhisperLyrics.WEAK_LANGUAGES) {
+            updateKaraoke(song) { it.copy(lyricsMessage = "Whisper can't follow $lang singing well enough to write the lyrics out.") }
+            return
+        }
         whisperJob = viewModelScope.launch {
             val dir = library.dir(song)
             try {
@@ -758,7 +765,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                     val aligned = withContext(Dispatchers.Default) {
                         LyricsAligner.align(lyrics.lines.map { r.romanize(it.text) }, heard.map { it.copy(text = r.romanize(it.text)) })
                     }
-                    if (aligned == null) null to "The singing didn't match these lyrics closely enough to time them. You can tap along instead (Sync)."
+                    if (aligned == null) null to "Couldn't time these lyrics from the singing: this recording sings verses they don't have, or in another order (covers often do). Tap sync instead."
                     else lyrics.copy(lines = lyrics.lines.mapIndexed { i, l -> l.copy(time = aligned.times[i]) },
                         source = lyrics.source.substringBefore("+") + "+whisper") to null
                 } else {

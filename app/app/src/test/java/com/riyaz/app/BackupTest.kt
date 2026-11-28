@@ -49,7 +49,7 @@ class BackupTest {
         File(b, "songbook/s1.json").writeText(JSONObject().put("id", "s1").put("title", "Edited later").put("updated", 200).toString())
         val r = Backup.restore(b, ByteArrayInputStream(zip.toByteArray()))
         assertEquals(2, r.songs); assertTrue(r.voice)
-        assertEquals(0, r.sheets)   // the phone's copy of s1 is newer, so it stays
+        assertEquals(1, r.sheets)   // counted, but the phone's copy of s1 is newer, so it stays
         assertEquals("Edited later", JSONObject(File(b, "songbook/s1.json").readText()).getString("title"))
         val meta = JSONObject(File(b, "songs/yt-abc/meta.json").readText())
         assertEquals(-2, meta.getInt("semitones")); assertEquals(2, meta.getInt("capo")); assertEquals(-1, meta.getInt("fitBase"))

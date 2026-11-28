@@ -7,5 +7,6 @@
         <receiver android:name=".SeparateTestReceiver" android:exported="true" />
         <receiver android:name=".ToneTestReceiver" android:exported="true" />
         <receiver android:name=".FitTestReceiver" android:exported="true" />
+        <receiver android:name=".WhisperTestReceiver" android:exported="true" />
     </application>
 </manifest>

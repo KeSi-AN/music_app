@@ -69,6 +69,11 @@ bool transcribe(const TranscribeJob &job, std::vector<HeardSegment> &out, std::a
     if (!job.vadModelPath.empty()) {
         p.vad = true;
         p.vad_model_path = job.vadModelPath.c_str();
+        // singing has few real silences: without a cap, a whole verse becomes one stretch, Whisper writes a
+        // line or two for it and the times are useless. ~12 s pieces keep every phrase and its time.
+        p.vad_params.max_speech_duration_s = 12.0f;
+        p.vad_params.min_silence_duration_ms = 300;
+        p.vad_params.speech_pad_ms = 100;
     }
     p.progress_callback = [](whisper_context *, whisper_state *, int pct, void *user) {
         auto *pr = static_cast<std::atomic<float> *>(user);

@@ -10,8 +10,11 @@ data class TimedText(val start: Double, val end: Double, val text: String)
  * choruses land on the right repeat). Each line gets the time of the first of its letters that matched.
  */
 object LyricsAligner {
+    const val WEAK_LINE = 0.5f
+    const val MAX_WEAK_SHARE = 0.5f   // measured: a good sync (WHITE KEYS) had 29% weak lines, a cover singing other verses 69%
 
-    data class Result(val times: List<Double>, val matched: Float)
+    /** [lineMatch]: share of each line's letters found in the singing (low = probably not sung there). */
+    data class Result(val times: List<Double>, val matched: Float, val lineMatch: List<Float> = emptyList())
 
     /**
      * Sound-alike key: romanised, lower-case letters only, with the spellings people mix up merged
@@ -29,7 +32,7 @@ object LyricsAligner {
      * [lines]: the lyrics, romanised. [heard]: what Whisper heard, romanised, with times. Returns a start
      * time for every line, or null when too little of the lyrics could be found in the recording.
      */
-    fun align(lines: List<String>, heard: List<TimedText>, minMatched: Float = 0.35f): Result? {
+    fun align(lines: List<String>, heard: List<TimedText>, minMatched: Float = 0.35f, maxWeakShare: Float = MAX_WEAK_SHARE): Result? {
         val a = StringBuilder()
         val lineOf = ArrayList<Int>()
         lines.forEachIndexed { i, l -> key(l).forEach { a.append(it); lineOf += i } }
@@ -66,12 +69,12 @@ object LyricsAligner {
         // free end in b: finish wherever the last lyric letter is cheapest
         var j = (0..m).minByOrNull { prev[it] }!!
         var i = n
-        val firstHit = arrayOfNulls<Double>(lines.size)
+        val hitTime = arrayOfNulls<Double>(n)       // time of the heard letter each lyric letter matched
         var matched = 0
         while (i > 0 && j > 0) {
             when (back[i * (m + 1) + j].toInt()) {
                 0 -> {
-                    if (a[i - 1] == b[j - 1]) { matched++; firstHit[lineOf[i - 1]] = timeOf[j - 1] }
+                    if (a[i - 1] == b[j - 1]) { matched++; hitTime[i - 1] = timeOf[j - 1] }
                     i--; j--
                 }
                 1 -> i--
@@ -80,6 +83,24 @@ object LyricsAligner {
         }
         val ratio = matched.toFloat() / n
         if (ratio < minMatched) return null
+
+        val lineLetters = IntArray(lines.size)
+        val lineHits = IntArray(lines.size)
+        for (p in 0 until n) { lineLetters[lineOf[p]]++; if (hitTime[p] != null) lineHits[lineOf[p]]++ }
+        val lineMatch = lines.indices.map { if (lineLetters[it] == 0) 1f else lineHits[it].toFloat() / lineLetters[it] }
+        // When the recording sings verses the lyrics don't have, or in another order (common in covers),
+        // in-order alignment stretches lines over the wrong singing; they then match only patchily. Better
+        // to say so than to show wrong timings.
+        if (lineMatch.count { it < WEAK_LINE } > lines.size * maxWeakShare) return null
+
+        // a line's time: its first run of 3 matched letters (stray single letters can match anywhere)
+        val firstHit = arrayOfNulls<Double>(lines.size)
+        for (p in 0 until n) {
+            val line = lineOf[p]
+            if (firstHit[line] != null) continue
+            val run = (0 until 3).all { d -> p + d < n && lineOf[p + d] == line && hitTime[p + d] != null }
+            if (run) firstHit[line] = hitTime[p]
+        }
 
         // lines nothing matched in: share out the time between their neighbours by length
         val times = DoubleArray(lines.size) { firstHit[it] ?: Double.NaN }
@@ -105,6 +126,6 @@ object LyricsAligner {
                 acc += len(idx)
             }
         }
-        return Result(times.toList(), ratio)
+        return Result(times.toList(), ratio, lineMatch)
     }
 }

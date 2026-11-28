@@ -159,7 +159,8 @@ object Backup {
             val incoming = runCatching { JSONObject(String(bytes)) }.getOrNull() ?: continue
             val local = File(book, fileName)
             val localUpdated = runCatching { JSONObject(local.readText()).optLong("updated") }.getOrNull()
-            if (localUpdated == null || incoming.optLong("updated") > localUpdated) { local.writeBytes(bytes); sheets++ }
+            if (localUpdated == null || incoming.optLong("updated") > localUpdated) local.writeBytes(bytes)
+            sheets++   // counted either way: the phone's copy was newer, or it now has the backup's
         }
         var setlists = 0
         entries["songbook/setlists.json"]?.let { bytes ->
